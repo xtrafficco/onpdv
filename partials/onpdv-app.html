@@ -1,0 +1,1072 @@
+<div id="app" class="hide">
+  <div class="bo">
+    <aside class="bo-side" id="boSidebar" aria-label="Navegação principal">
+      <div class="bo-side-head"><div class="bo-brand"><span class="on">ON</span>PDV</div><button class="bo-side-close" id="boSideClose" type="button" aria-label="Fechar menu">×</button></div>
+      <button class="bo-pdv" id="btnEnterPdv">🛒 Abrir Frente de Caixa</button>
+      <nav class="bo-nav" aria-label="Módulos do sistema">
+        <section class="bo-nav-group open" data-nav-group="vendas">
+          <button class="bo-group-toggle" type="button" aria-expanded="true"><span>Vendas</span><span aria-hidden="true">⌄</span></button>
+          <div class="bo-group-items">
+            <button data-page="home" class="act">🏠 Início</button>
+            <button data-page="pedidos">📋 Pedidos</button>
+            <button data-page="entregas">🚚 Entregas</button>
+            <button data-page="gaveta">💰 Caixa</button>
+            <button data-page="relatorio">📊 Relatórios</button>
+            <button data-page="vales">🎁 Vale-presente</button>
+          </div>
+        </section>
+        <section class="bo-nav-group" data-nav-group="estoque">
+          <button class="bo-group-toggle" type="button" aria-expanded="false"><span>Estoque</span><span aria-hidden="true">⌄</span></button>
+          <div class="bo-group-items">
+            <button data-page="estoque">📦 Produtos e estoque</button>
+            <button data-page="estoquecrm" data-parent="estoque" class="bo-sub">CRM inteligente</button>
+            <button data-page="validade" data-parent="estoque" class="bo-sub">Validade de lotes</button>
+            <button data-page="inventario" data-parent="estoque" class="bo-sub">Inventário rotativo</button>
+            <button data-page="nfimport" data-parent="estoque" class="bo-sub">NF-e importadas</button>
+            <button data-page="encalhados" data-parent="estoque" class="bo-sub">Produtos encalhados</button>
+            <button data-page="pedidoint">🧠 Pedido inteligente</button>
+            <button data-page="transfer">🔄 Transferências</button>
+            <button data-page="promocoes">🎯 Promoções</button>
+            <button data-page="importexcel">📥 Importação inteligente</button>
+          </div>
+        </section>
+        <section class="bo-nav-group" data-nav-group="financeiro">
+          <button class="bo-group-toggle" type="button" aria-expanded="false"><span>Financeiro</span><span aria-hidden="true">⌄</span></button>
+          <div class="bo-group-items">
+            <button data-page="financeiroint">📈 Financeiro inteligente</button>
+            <button data-page="crediario">🧾 Contas a receber</button>
+            <button data-page="crediariocrm" data-parent="crediario" class="bo-sub">CRM · Contas a receber</button>
+            <button data-page="pagar">💸 Contas a pagar</button>
+            <button data-page="pagarcrm" data-parent="pagar" class="bo-sub">CRM · Contas a pagar</button>
+            <button data-page="concilmp">💳 Conciliação MP</button>
+          </div>
+        </section>
+        <section class="bo-nav-group" data-nav-group="clientes">
+          <button class="bo-group-toggle" type="button" aria-expanded="false"><span>Clientes</span><span aria-hidden="true">⌄</span></button>
+          <div class="bo-group-items">
+            <button data-page="clientes">👤 Cadastro de clientes</button>
+            <button data-page="credint">🧾 Crediário inteligente</button>
+            <button data-page="cashbackint">🎁 Cashback inteligente</button>
+            <button data-page="nps">⭐ NPS</button>
+            <button data-page="churn">📉 Clientes em risco</button>
+          </div>
+        </section>
+        <section class="bo-nav-group" data-nav-group="inteligencia">
+          <button class="bo-group-toggle" type="button" aria-expanded="false"><span>Inteligência</span><span aria-hidden="true">⌄</span></button>
+          <div class="bo-group-items">
+            <button data-page="decisao">🧭 Central de Decisão</button>
+            <button data-page="estoqueint">📦 Estoque inteligente</button>
+            <button data-page="sortimento">🧩 Sortimento</button>
+            <button data-page="contagemex">🎯 Contagem por exceção</button>
+            <button data-page="granelint">⚖️ Granel inteligente</button>
+            <button data-page="simuladores">🧮 Simuladores</button>
+            <button data-page="assistente">🤖 Assistente de gestão</button>
+            <button data-page="operacoes">🛡️ Operações 360</button>
+            <button data-page="prevencao">🚨 Prevenção de perdas</button>
+            <button data-page="auditoria">🔎 Auditoria</button>
+            <button data-page="precos">🏷️ Preços por margem</button>
+          </div>
+        </section>
+        <section class="bo-nav-group" data-nav-group="configuracoes">
+          <button class="bo-group-toggle" type="button" aria-expanded="false"><span>Configurações</span><span aria-hidden="true">⌄</span></button>
+          <div class="bo-group-items"><button data-page="config">⚙️ Configurações</button></div>
+        </section>
+      </nav>
+    </aside>
+    <button class="bo-sidebar-scrim" id="boSidebarScrim" type="button" aria-label="Fechar menu"></button>
+    <div class="bo-main">
+      <header class="bo-top">
+        <button class="bo-menu-toggle" id="boMenuToggle" type="button" aria-controls="boSidebar" aria-expanded="false" aria-label="Abrir menu">☰</button><div class="bo-title" id="boTitle">Início</div>
+        <div class="bo-topright">
+          <select id="storeSel" class="in bo-store"></select>
+          <span id="cashChip"></span>
+          <span id="whoName" class="bo-user">—</span>
+          <button id="btnTvPanel" class="btn ghost sm" title="Painel para TV (metas do dia)">📺 TV</button>
+          <button id="btnMyPass" class="btn ghost sm" title="Trocar a minha senha">🔑 Senha</button>
+          <button id="btnLogout" class="btn ghost sm">Sair</button>
+        </div>
+      </header>
+      <div class="bo-content">
+
+    <!-- ---- HOME (backoffice) ---- -->
+    <div id="page-home" class="page act">
+      <div class="home-hero">
+        <div>
+          <h1 class="home-h1">Painel</h1>
+          <p class="muted" id="homeDate"></p>
+        </div>
+        <button class="btn acc home-enter" id="btnEnterPdv2">🛒 Abrir Frente de Caixa</button>
+      </div>
+      <div class="stats" id="homeGeral"></div>
+      <h2 class="home-sec">Lojas</h2>
+      <div class="stats" id="homeStores"></div>
+      <div class="card pad u-static-1">
+        <div class="head"><h2 class="u-static-2">🏪 Resumo por loja</h2><span class="grow"></span>
+          <button class="btn ghost sm" id="btnHomeRefresh">Atualizar</button></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Loja</th><th class="r">Vendas hoje</th><th class="r">Nº</th><th class="r">Ticket</th>
+            <th class="r">A receber</th><th class="r">Vencido</th><th class="r">A pagar</th><th class="r">Vencido</th>
+            <th class="c">Entregas</th><th class="c">Estoque baixo</th></tr></thead>
+          <tbody id="homeStoreBody"></tbody>
+        </table></div>
+      </div>
+      <div class="card pad u-static-3"><div class="head"><h2 class="u-static-4">🎯 Metas de venda do mês</h2><span class="grow"></span>
+        <button class="btn ghost sm" id="btnGoalSet">Definir metas</button></div><div id="homeGoals"></div></div>
+      <div class="grid2 u-static-3">
+        <div class="card pad"><div class="head"><h2 class="u-static-4">🎂 Aniversariantes do mês</h2></div><div id="homeBday"></div></div>
+        <div class="card pad"><div class="head"><h2 class="u-static-4">💸 Contas a pagar próximas</h2></div><div id="homePay"></div></div>
+      </div>
+      <div class="card pad u-static-3"><div class="head"><h2 class="u-static-4">📦 Estoque baixo (loja atual)</h2></div><div id="homeLow"></div></div>
+    </div>
+
+
+    <!-- ---- CENTRAL DE DECISÃO ---- -->
+    <div id="page-decisao" class="page">
+      <div class="home-hero">
+        <div>
+          <h1 class="home-h1">Central de Decisão</h1>
+          <p class="muted" id="dcSubtitle">O que precisa de atenção agora.</p>
+        </div>
+        <div class="u-static-5">
+          <button class="btn ghost home-enter" id="btnDcAnalyze">Analisar empresa</button>
+          <button class="btn acc home-enter" id="btnDcRefresh">Atualizar</button>
+        </div>
+      </div>
+      <div class="stats" id="dcHealth"></div>
+      <div class="grid2 u-static-1">
+        <div class="card pad">
+          <div class="head"><h2 class="u-static-6">Situação do caixa</h2></div>
+          <div id="dcCash"></div>
+        </div>
+        <div class="card pad">
+          <div class="head"><h2 class="u-static-6">O que fazer hoje</h2></div>
+          <div id="dcToday"></div>
+        </div>
+      </div>
+      <div class="grid2 u-static-1">
+        <div class="card pad">
+          <div class="head"><h2 class="u-static-6">Alertas inteligentes</h2></div>
+          <div id="dcAlerts"></div>
+        </div>
+        <div class="card pad">
+          <div class="head"><h2 class="u-static-6">Produtos campeões e problema</h2></div>
+          <div id="dcProducts"></div>
+        </div>
+      </div>
+      <div class="card pad u-static-1">
+        <div class="head"><h2 class="u-static-6">Diagnóstico da empresa</h2><span class="grow"></span>
+          <span id="dcScope" class="muted u-static-7"></span></div>
+        <div id="dcDiagnosis"></div>
+      </div>
+    </div>
+
+
+    <!-- ---- IMPORTAÇÃO INTELIGENTE ---- -->
+    <div id="page-importexcel" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>📥 Importação inteligente</h2><span class="grow"></span>
+          <select id="ixTipo" class="in u-static-9">
+            <option value="produtos">Produtos / estoque</option>
+            <option value="clientes">Clientes</option>
+            <option value="vendas">Vendas</option>
+            <option value="compras">Compras</option>
+            <option value="pagar">Contas a pagar</option>
+            <option value="receber">Contas a receber</option>
+            <option value="movestoque">Movimento de estoque</option>
+          </select>
+          <button class="btn ghost" id="btnIxModel">Baixar modelo</button>
+          <button class="btn" id="btnIxPick">Selecionar arquivo</button>
+        </div>
+        <input type="file" id="ixFile" accept=".csv,.tsv,.txt,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="hide">
+        <div class="pdv-note u-static-10">Aceita CSV/TSV diretamente. Arquivos Excel (.xlsx/.xls) são reconhecidos e validados quando o navegador tiver leitor compatível carregado; sem isso, salve a planilha como CSV para importar sem risco.</div>
+        <div id="ixSummary" class="stats"></div>
+      </div>
+      <div class="card pad">
+        <div class="head"><h2 class="u-static-6">Prévia, validação e relatório de erros</h2><span class="grow"></span>
+          <button class="btn green" id="btnIxApply">Importar dados válidos</button></div>
+        <div id="ixPreview"><p class="muted u-static-11">Selecione um arquivo para analisar as colunas e inconsistências.</p></div>
+      </div>
+    </div>
+
+    <!-- ---- FINANCEIRO INTELIGENTE ---- -->
+    <div id="page-financeiroint" class="page">
+      <div class="head u-static-12"><div><h2>📈 Financeiro inteligente</h2><p class="muted">DRE, fluxo projetado, contas em risco e impacto no caixa.</p></div><span class="grow"></span>
+        <button class="btn ghost" id="btnFiCashflow">Abrir fluxo</button><button class="btn ghost" id="btnFiDre">Abrir DRE</button><button class="btn" id="btnFiRefresh">Atualizar</button></div>
+      <div class="stats" id="fiStats"></div>
+      <div class="grid2 u-static-1">
+        <div class="card pad"><div class="head"><h2 class="u-static-6">Interpretação financeira</h2></div><div id="fiInsights"></div></div>
+        <div class="card pad"><div class="head"><h2 class="u-static-6">Comparativo: deveria pagar x foi pago</h2></div><div id="fiCompare"></div></div>
+      </div>
+    </div>
+
+    <!-- ---- ESTOQUE INTELIGENTE ---- -->
+    <div id="page-estoqueint" class="page">
+      <div class="head u-static-12"><div><h2>📦 Estoque inteligente</h2><p class="muted">ABC, giro, capital parado, campeões e problemas.</p></div><span class="grow"></span>
+        <button class="btn ghost" id="btnEiAbc">Curva ABC</button><button class="btn" id="btnEiRefresh">Atualizar</button></div>
+      <div class="stats" id="eiStats"></div>
+      <div class="grid2 u-static-1">
+        <div class="card pad"><div class="head"><h2 class="u-static-6">Comprar, reduzir ou liquidar</h2></div><div id="eiActions"></div></div>
+        <div class="card pad"><div class="head"><h2 class="u-static-6">Capital parado</h2></div><div id="eiCapital"></div></div>
+      </div>
+      <div class="card pad u-static-1"><div class="head"><h2 class="u-static-6">Produtos campeões e produtos problema</h2></div><div id="eiProducts"></div></div>
+    </div>
+
+    <!-- ---- GESTÃO DE SORTIMENTO ---- -->
+    <div id="page-sortimento" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>🧩 Gestão de sortimento</h2><span class="grow"></span>
+          <select id="sortDim" class="in u-static-13"><option value="categoria">Categoria</option><option value="fornecedor">Fornecedor / marca</option></select>
+          <button class="btn" id="btnSortRefresh">Analisar</button></div>
+        <div class="pdv-note u-static-10">Mostra quanto cada grupo vende, lucra e consome de capital. Use para decidir o que manter, reduzir ou liquidar.</div>
+        <div id="sortStats" class="stats"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Grupo</th><th class="r">Itens</th><th class="r">Capital</th><th class="r">Faturamento</th><th class="r">Margem</th><th>Decisão</th></tr></thead>
+          <tbody id="sortBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- CONTAGEM POR EXCEÇÃO ---- -->
+    <div id="page-contagemex" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>🎯 Contagem de estoque por exceção</h2><span class="grow"></span>
+          <input id="ceLimit" class="in u-static-14" value="12" inputmode="numeric" title="Itens">
+          <button class="btn ghost" id="btnCeOpen">Abrir inventário destes itens</button>
+          <button class="btn" id="btnCeRefresh">Gerar lista</button></div>
+        <div id="ceStats" class="stats"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Produto</th><th>Motivo</th><th class="r">Saldo</th><th class="r">Mínimo</th><th class="r">Capital</th><th class="r">Risco</th></tr></thead>
+          <tbody id="ceBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- GRANEL INTELIGENTE ---- -->
+    <div id="page-granelint" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>⚖️ Controle de granel</h2><span class="grow"></span>
+          <button class="btn ghost" id="btnGrConfig">Configurar balança</button><button class="btn" id="btnGrRefresh">Atualizar</button></div>
+        <div class="pdv-note u-static-10">Produtos em KG já vendem por peso no PDV. Este painel calcula saco aberto, restante estimado, perda e valor em risco usando cadastro e estoque atual.</div>
+        <div id="grStats" class="stats"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Produto KG</th><th class="r">Peso cadastrado</th><th class="r">Saldo</th><th class="r">Restante no saco</th><th class="r">Perda estimada</th><th>Recomendação</th></tr></thead>
+          <tbody id="grBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- CREDIÁRIO INTELIGENTE ---- -->
+    <div id="page-credint" class="page">
+      <div class="head u-static-12"><div><h2>🧾 Crediário inteligente</h2><p class="muted">Score, limite sugerido, inadimplência e alerta de venda.</p></div><span class="grow"></span>
+        <button class="btn" id="btnCiRefresh">Atualizar</button></div>
+      <div class="stats" id="ciStats"></div>
+      <div class="card pad"><div class="tbl-wrap"><table>
+        <thead><tr><th>Cliente</th><th class="r">Aberto</th><th class="r">Vencido</th><th class="r">Atraso</th><th class="r">Score</th><th class="r">Limite sugerido</th><th>Decisão</th></tr></thead>
+        <tbody id="ciBody"></tbody>
+      </table></div></div>
+    </div>
+
+    <!-- ---- CASHBACK INTELIGENTE ---- -->
+    <div id="page-cashbackint" class="page">
+      <div class="head u-static-12"><div><h2>🎁 Cashback inteligente</h2><p class="muted">Política comercial para estimular entrada de caixa.</p></div><span class="grow"></span>
+        <button class="btn ghost" id="btnCbAdmin">Configurar campanhas</button><button class="btn" id="btnCbRefresh">Atualizar</button></div>
+      <div class="stats" id="cbiStats"></div>
+      <div class="grid2 u-static-1">
+        <div class="card pad"><div class="head"><h2 class="u-static-6">Política recomendada</h2></div><div id="cbiPolicy"></div></div>
+        <div class="card pad"><div class="head"><h2 class="u-static-6">Impacto no caixa</h2></div><div id="cbiImpact"></div></div>
+      </div>
+    </div>
+
+    <!-- ---- SIMULADORES ---- -->
+    <div id="page-simuladores" class="page">
+      <div class="card pad">
+        <div class="head"><h2>🧮 Simuladores</h2><span class="grow"></span><button class="btn" id="btnSimRun">Simular</button></div>
+        <div class="grid2">
+          <div class="field"><label class="lbl">Compra adicional (R$)</label><input id="simCompra" class="in" value="20000" inputmode="decimal"></div>
+          <div class="field"><label class="lbl">Reduzir estoque em (%)</label><input id="simReducao" class="in" value="20" inputmode="decimal"></div>
+          <div class="field"><label class="lbl">Aumentar prazo fornecedor (dias)</label><input id="simPrazo" class="in" value="15" inputmode="numeric"></div>
+          <div class="field"><label class="lbl">Eliminar grupo</label><select id="simGrupo" class="in"><option value="">Selecione após carregar</option></select></div>
+        </div>
+      </div>
+      <div class="u-static-1" id="simResult"></div>
+    </div>
+
+    <!-- ---- ASSISTENTE DE GESTÃO ---- -->
+    <div id="page-assistente" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>🤖 Assistente de gestão</h2><span class="grow"></span>
+          <button class="btn acc" id="btnAgRun">Analisar empresa</button></div>
+        <div class="pdv-note u-static-10">Interpreta todos os indicadores disponíveis e entrega um diagnóstico priorizado para o gestor.</div>
+        <div id="agOutput"><p class="muted u-static-11">Clique em Analisar empresa para gerar o diagnóstico.</p></div>
+      </div>
+    </div>
+
+
+    <!-- ---- ENTREGAS (fila) ---- -->
+    <div id="page-entregas" class="page">
+      <div class="stats" id="delivStats"></div>
+      <div class="card pad u-static-15">
+        <div class="head u-static-8"><h2>🗺️ Rastreio em tempo real</h2><span class="grow"></span>
+          <span class="chip ok" id="trkLive" title="Atualiza sozinho">⚡ ao vivo</span>
+          <button class="btn ghost sm" id="btnTrkFit">Centralizar</button></div>
+        <div class="u-static-16" id="trkMap"></div>
+        <div id="trkLegend" class="muted u-static-17">
+          <span>🟢 motoboy online</span><span>⚪ offline</span><span>🟦 entrega na fila</span>
+          <span>🟧 saiu p/ entrega</span><span>🏪 loja</span><span>— trilha percorrida</span>
+          <span class="u-static-18">trecho estimado (sem leitura GPS)</span>
+          <span class="grow"></span><span id="trkStatus"></span>
+        </div>
+      </div>
+      <div class="card pad">
+        <div class="head u-static-8"><h2>🚚 Fila de entregas</h2><span class="grow"></span>
+          <input id="delivIni" type="date" class="in u-static-19" title="De">
+          <input id="delivFim" type="date" class="in u-static-19" title="Até">
+          <button class="btn ghost sm" id="btnDelivHoje">Hoje</button>
+          <select id="delivFilter" class="in u-static-13"><option value="">Todas</option><option value="fila">Na fila</option><option value="em_rota">Saiu para entrega</option><option value="entregue">Entregues</option></select>
+          <span class="chip ok" id="delivLive" title="Atualiza sozinho quando o motoboy escaneia">⚡ tempo real</span>
+          <button class="btn ghost" id="btnDelivRoute" title="Ordena as paradas pela rota mais curta">🧭 Roteirizar</button>
+          <button class="btn" id="btnDelivRefresh">Atualizar</button></div>
+        <p class="muted u-static-20">Clique na linha para ver os itens e os valores do pedido.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>#</th><th>Cliente</th><th>Telefone</th><th>Endereço</th><th>Loja</th><th class="r">Frete</th><th class="r">Total</th><th>Status</th><th class="c">Previsão / tempo</th><th></th></tr></thead>
+          <tbody id="delivBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- PEDIDO INTELIGENTE ---- -->
+    <div id="page-pedidoint" class="page">
+      <div class="card pad">
+        <div class="head"><h2>🧠 Pedido inteligente</h2><span class="muted u-static-7">Considera calendário de vendas, sazonalidade, prazo real, segurança, lotes, promoções e saldo das outras lojas.</span></div>
+        <div class="grid2">
+          <div class="field"><label class="lbl">Fornecedor</label><select id="soSup" class="in"><option value="">Todos</option></select></div>
+          <div class="field"><label class="lbl">Loja</label><select id="soStore" class="in"></select></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label class="lbl">Histórico de vendas (dias)</label><input id="soDias" class="in" value="90" inputmode="numeric"></div>
+          <div class="field"><label class="lbl">Cobertura desejada (dias)</label><input id="soCob" class="in" value="30" inputmode="numeric"></div>
+        </div>
+        <div class="u-static-21">
+          <button class="btn" id="btnSmartCalc">Calcular pedido</button>
+          <button class="btn green" id="btnSmartDrafts" disabled>📝 Criar rascunhos para aprovação</button>
+        </div>
+        <div id="soSummary" class="muted u-static-22">Nenhuma sugestão calculada.</div>
+      </div>
+      <div class="u-static-1" id="soResult"></div>
+      <div class="card pad u-static-3">
+        <div class="head"><h2 class="u-static-2">🧾 Compras registradas</h2><span class="grow"></span>
+          <select id="poFilter" class="in u-static-23"><option value="">Todas</option><option value="rascunho">Rascunhos</option><option value="pendente">Pendentes</option><option value="parcial">Parciais</option><option value="recebido">Recebidas</option></select>
+          <button class="btn ghost sm" id="btnPoRefresh">Atualizar</button></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Data</th><th>Fornecedor</th><th>Loja</th><th class="r">Previsto</th><th class="r">Recebido</th><th>Status</th><th></th></tr></thead>
+          <tbody id="poBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- PRODUTOS ENCALHADOS ---- -->
+    <div id="page-encalhados" class="page">
+      <div class="card pad">
+        <div class="head u-static-24"><div><h2>📦 Produtos encalhados</h2><p class="muted">Capital parado, última venda e promoção sugerida sem vender abaixo da margem mínima.</p></div><span class="grow"></span>
+          <select id="staleStore" class="in u-static-9"></select>
+          <select id="staleDays" class="in u-static-13"><option value="30">30 dias sem venda</option><option value="60" selected>60 dias sem venda</option><option value="90">90 dias sem venda</option><option value="120">120 dias sem venda</option></select>
+          <button class="btn" id="btnStaleLoad">Analisar</button></div>
+        <div class="stats" id="staleStats"></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Produto</th><th>Última venda</th><th class="r">Dias parado</th><th class="r">Saldo</th><th class="r">Capital parado</th><th class="r">Preço atual</th><th class="r">Sugestão</th><th>Prioridade</th><th></th></tr></thead>
+          <tbody id="staleBody"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- ---- CAIXA (Frente de Caixa PetApp) ---- -->
+    <div id="page-caixa" class="page"><div id="caixaBody"></div></div>
+
+    <!-- ---- CAIXA / GAVETA ---- -->
+    <div id="page-gaveta" class="page">
+      <div id="cashClosed" class="card pad hide u-static-25">
+        <div class="u-static-26">💰</div>
+        <h2 class="u-static-27">Caixa fechado</h2>
+        <p class="muted u-static-28">Abra o caixa informando o valor inicial (fundo de troco).</p>
+        <div class="field"><label class="lbl">Valor de abertura</label><input id="cashOpenVal" class="in" value="0" inputmode="decimal"></div>
+        <button class="btn green block" id="btnCashOpen">Abrir caixa</button>
+      </div>
+      <div id="cashOpen" class="hide">
+        <div class="stats" id="cashStats"></div>
+        <p id="cashCredObs" class="muted u-static-29"></p>
+        <div class="erp-cols">
+          <div class="card pad">
+            <div class="head"><h2 class="u-static-6">Movimentações</h2><span class="grow"></span>
+              <button class="btn ghost sm" id="btnCashSupply">↧ Suprimento</button>
+              <button class="btn ghost sm" id="btnCashWithdraw">↥ Sangria</button></div>
+            <div class="tbl-wrap"><table>
+              <thead><tr><th>Hora</th><th>Tipo</th><th>Motivo</th><th class="r">Valor</th></tr></thead>
+              <tbody id="cashMovBody"></tbody></table></div>
+          </div>
+          <div class="card pad u-static-30">
+            <h2 class="u-static-31">Fechar caixa</h2>
+            <div class="field"><label class="lbl">Valor contado na gaveta</label><input id="cashCountVal" class="in" value="0" inputmode="decimal"></div>
+            <button class="btn red block" id="btnCashClose">Fechar caixa (conferência)</button>
+            <button class="btn ghost block mt-8" id="btnCashShare">📲 Enviar resumo no WhatsApp</button>
+          </div>
+        </div>
+        <div class="card pad u-static-1">
+          <div class="head"><h2 class="u-static-6">📊 Histórico de fechamentos</h2><span class="grow"></span>
+            <input id="chIni" type="date" class="in u-static-23">
+            <input id="chFim" type="date" class="in u-static-23">
+            <button class="btn" id="btnCashHist">Ver</button></div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th>Fechado</th><th>Loja</th><th>Operador</th><th class="r">Dinheiro</th><th class="r">PIX</th><th class="r">Cartão</th><th class="r">Esperado</th><th class="r">Contado</th><th class="r">Diferença</th></tr></thead>
+            <tbody id="cashHistBody"></tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---- PEDIDOS ---- -->
+    <div id="page-pedidos" class="page">
+      <div class="card pad">
+        <div class="head u-static-8">
+          <h2>📋 Pedidos</h2><span class="grow"></span>
+          <input id="ordSearch" class="in u-static-23" placeholder="# ou cliente…">
+          <input id="ordIni" type="date" class="in u-static-19" title="De">
+          <input id="ordFim" type="date" class="in u-static-19" title="Até">
+          <select id="ordStore" class="in u-static-23"><option value="">Todas as lojas</option></select>
+          <select id="ordTipo" class="in u-static-32"><option value="">Todos os tipos</option><option value="venda">Venda</option><option value="pedido">Pedido</option><option value="orcamento">Orçamento</option></select>
+          <select id="ordStatus" class="in u-static-32"><option value="">Todos status</option><option value="paga">Paga</option><option value="aberta">Aberta</option><option value="orcamento">Orçamento</option><option value="cancelada">Cancelada</option></select>
+          <button class="btn" id="btnOrders">Filtrar</button>
+        </div>
+        <div id="ordResumo" class="muted u-static-10"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>#</th><th>Data</th><th>Loja</th><th>Cliente</th><th>Forma</th><th>Status</th><th>Nota</th><th class="r">Total</th><th></th></tr></thead>
+          <tbody id="ordBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- CLIENTES ---- -->
+    <div id="page-clientes" class="page">
+      <div id="petCrm"></div>
+      <div class="card pad">
+        <div class="head"><h2>👤 Clientes</h2><span class="grow"></span>
+          <input id="custFilter" class="in u-static-33" placeholder="Buscar…">
+          <button class="btn ghost" id="btnCashback">🎁 Cashback</button>
+          <button class="btn ghost" id="btnCustModel">⬇ Modelo CSV</button>
+          <button class="btn ghost" id="btnCustImport">↑ Importar clientes</button>
+          <button class="btn" id="btnNewCust">+ Novo cliente</button></div>
+        <input type="file" id="custCsvFile" accept=".csv,text/csv" class="hide">
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Código</th><th>Nome</th><th>Telefone</th><th>Documento</th><th class="r">Limite</th><th class="r">Deve</th><th></th></tr></thead>
+          <tbody id="custBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- VALE-PRESENTE / CARTEIRA ---- -->
+    <div id="page-vales" class="page">
+      <div class="card pad">
+        <div class="head"><h2>🎁 Emitir vale-presente / carteira</h2></div>
+        <div class="u-static-34">
+          <label class="u-static-35">Tipo
+            <select id="vlTipo" class="in">
+              <option value="presente">Vale-presente (uso único / avulso)</option>
+              <option value="carteira">Carteira pré-paga (recarregável)</option>
+            </select></label>
+          <label class="u-static-35">Valor (R$)
+            <input id="vlValor" class="in" inputmode="decimal" placeholder="0,00"></label>
+          <label class="u-static-35">Cliente (opcional)
+            <input id="vlCliente" class="in" list="vlClientes" placeholder="Nome do cliente…">
+            <datalist id="vlClientes"></datalist></label>
+          <label class="u-static-35">Validade (opcional)
+            <input id="vlValidade" class="in" type="date"></label>
+          <label class="u-static-35">Código (opcional — gera automático)
+            <input id="vlCodigo" class="in" placeholder="Deixe vazio para gerar"></label>
+          <label class="u-static-35">Observação
+            <input id="vlObs" class="in" placeholder="Ex.: campanha dia das mães"></label>
+        </div>
+        <div class="u-static-1"><button class="btn green" id="btnVlEmitir">Emitir vale</button></div>
+        <div class="u-static-36" id="vlEmitResult"></div>
+      </div>
+
+      <div class="card pad">
+        <div class="head"><h2>🔎 Consultar / operar</h2></div>
+        <div class="u-static-37">
+          <input id="vlConsCod" class="in max-w-220" placeholder="Código do vale">
+          <button class="btn" id="btnVlConsultar">Consultar saldo</button>
+        </div>
+        <div class="u-static-36" id="vlConsResult"></div>
+      </div>
+
+      <div class="card pad">
+        <div class="head"><h2>📋 Vales emitidos</h2><span class="grow"></span>
+          <select id="vlFiltroStatus" class="in u-static-38">
+            <option value="">Todos os status</option>
+            <option value="ativo">Ativos</option>
+            <option value="esgotado">Esgotados</option>
+            <option value="expirado">Expirados</option>
+            <option value="cancelado">Cancelados</option>
+          </select>
+          <input id="vlBusca" class="in u-static-33" placeholder="Buscar código/cliente…">
+        </div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Código</th><th>Tipo</th><th>Cliente</th><th>Status</th><th class="r">Saldo</th><th>Validade</th><th></th></tr></thead>
+          <tbody id="vlBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- CONCILIAÇÃO MERCADO PAGO ---- -->
+    <div id="page-concilmp" class="page">
+      <div class="card pad">
+        <div class="head"><h2>💳 Conciliação Mercado Pago</h2><span class="grow"></span>
+          <input id="cmIni" class="in u-static-23" type="date">
+          <input id="cmFim" class="in u-static-23" type="date">
+          <button class="btn ghost" id="btnCmLoad">Atualizar</button>
+          <button class="btn green" id="btnCmSync">⟳ Sincronizar do MP</button>
+        </div>
+        <div class="pdv-note u-static-10">Bruto = valor da venda · Taxa = tarifa do Mercado Pago · Líquido = o que cai na conta · Liberação = quando o dinheiro fica disponível.</div>
+        <div class="u-static-39" id="cmStats"></div>
+      </div>
+      <div class="card pad">
+        <div class="head"><h2>Por método de pagamento</h2></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Método</th><th class="r">Qtd</th><th class="r">Bruto</th><th class="r">Taxa</th><th class="r">Líquido</th></tr></thead>
+          <tbody id="cmMetodoBody"></tbody>
+        </table></div>
+      </div>
+      <div class="card pad">
+        <div class="head"><h2>Liquidações</h2></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Data</th><th>Método</th><th>Status</th><th class="r">Bruto</th><th class="r">Taxa</th><th class="r">Líquido</th><th>Liberação</th><th>Venda</th></tr></thead>
+          <tbody id="cmRowsBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- VALIDADE DE LOTES ---- -->
+    <div id="page-validade" class="page">
+      <div class="card pad">
+        <div class="head"><h2>⏳ Validade de lotes</h2><span class="grow"></span>
+          <label class="u-static-7">Vencer em até
+            <select id="lvDias" class="in u-static-40">
+              <option value="7">7 dias</option><option value="15">15 dias</option>
+              <option value="30" selected>30 dias</option><option value="60">60 dias</option><option value="90">90 dias</option>
+            </select></label>
+          <button class="btn ghost" id="btnLvLoad">Atualizar</button>
+        </div>
+        <div class="pdv-note u-static-10">Lotes com validade próxima (usa a entrada por lote). Use o desconto sugerido para “queimar” o estoque antes de vencer.</div>
+        <div class="u-static-41" id="lvStats"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Produto</th><th>Lote</th><th>Vence</th><th class="r">Dias</th><th class="r">Qtd</th><th class="r">Valor em risco</th><th class="r">Desc. sugerido</th></tr></thead>
+          <tbody id="lvBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- INVENTÁRIO ROTATIVO ---- -->
+    <div id="page-inventario" class="page">
+      <div class="card pad">
+        <div class="head"><h2>🔁 Inventário rotativo</h2><span class="grow"></span>
+          <select id="invCat" class="in u-static-42"><option value="">Todas as categorias</option></select>
+          <button class="btn green" id="btnInvOpen">+ Nova contagem</button>
+        </div>
+        <div class="pdv-note">Conte por categoria sem parar a loja. Ao fechar aplicando, o saldo é ajustado para o contado e registrado em movimentações de estoque.</div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Criada</th><th>Filtro</th><th>Status</th><th class="r">Itens</th><th class="r">Divergências</th><th></th></tr></thead>
+          <tbody id="invBody"></tbody>
+        </table></div>
+      </div>
+      <div id="invDetail"></div>
+    </div>
+
+    <!-- ---- NPS ---- -->
+    <div id="page-nps" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>⭐ NPS · satisfação</h2><span class="grow"></span>
+          <input id="npsIni" type="date" class="in u-static-23">
+          <input id="npsFim" type="date" class="in u-static-23">
+          <button class="btn ghost" id="btnNpsLoad">Atualizar</button>
+          <button class="btn" id="btnNpsAdd">+ Registrar resposta</button>
+        </div>
+        <div class="pdv-note u-static-10">Convite automático por WhatsApp ~2h após a entrega concluir (via fila de notificações + wa-send). Registre aqui as respostas recebidas.</div>
+        <div class="u-static-43" id="npsStats"></div>
+        <div class="u-static-28" id="npsDist"></div>
+        <h3 class="u-static-44">Comentários recentes</h3>
+        <div id="npsComments"></div>
+      </div>
+    </div>
+
+    <!-- ---- CLIENTES EM RISCO (CHURN) ---- -->
+    <div id="page-churn" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>📉 Clientes em risco de sumir</h2><span class="grow"></span>
+          <label class="pdv-lbl u-static-45">Sem comprar há (dias) ≥</label>
+          <input id="churnDias" type="number" class="in u-static-14" value="30">
+          <label class="pdv-lbl u-static-45">Atraso ×</label>
+          <input id="churnFator" type="number" step="0.1" class="in u-static-46" value="1.5">
+          <button class="btn ghost" id="btnChurnLoad">Atualizar</button>
+        </div>
+        <div class="pdv-note u-static-10">Clientes recorrentes (≥2 compras) cujo tempo sem comprar já passou da própria cadência histórica × o fator. Ordenados por valor gasto (LTV). Use o botão 📲 para chamar de volta pelo WhatsApp.</div>
+        <div class="u-static-43" id="churnStats"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Cliente</th><th class="r">Compras</th><th class="r">LTV</th><th class="r">Sem comprar</th><th class="r">Cadência</th><th class="r">Atraso</th><th></th></tr></thead>
+          <tbody id="churnBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- PREÇOS POR MARGEM-ALVO ---- -->
+    <div id="page-precos" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>🏷️ Preços por margem-alvo</h2><span class="grow"></span>
+          <label class="pdv-lbl u-static-45">Margem-alvo %</label>
+          <input id="pmMargem" type="number" step="0.5" class="in u-static-14" value="35">
+          <select id="pmCat" class="in u-static-38"><option value="">Todas categorias</option></select>
+          <label class="pdv-lbl u-static-45"><input type="checkbox" id="pmOnlyBelow" checked> só abaixo da meta</label>
+          <button class="btn ghost" id="btnPmLoad">Simular</button>
+          <button class="btn" id="btnPmApply" title="Aplica o preço sugerido aos itens marcados (somente admin)">Aplicar marcados</button>
+        </div>
+        <div class="pdv-note u-static-10">Preço sugerido = custo ÷ (1 − margem). Revise antes de aplicar — itens com custo mal cadastrado geram sugestões distorcidas. Só administradores aplicam.</div>
+        <div class="u-static-43" id="pmStats"></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th><input type="checkbox" id="pmAll" title="Marcar todos"></th><th>Produto</th><th>Categoria</th><th class="r">Custo</th><th class="r">Preço atual</th><th class="r">Margem</th><th class="r">Sugerido</th><th class="r">Δ</th></tr></thead>
+          <tbody id="pmBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- PROMOÇÕES ---- -->
+    <div id="page-promocoes" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>🎯 Promoções</h2><span class="grow"></span>
+          <button class="btn" id="btnPromoNew">+ Nova promoção</button>
+        </div>
+        <div class="pdv-note u-static-10">Dois tipos: <b>Por quantidade</b> — "a partir de N unidades, cada uma sai mais barata". <b>Pacote fechado</b> — "leve N por R$ Y" (ex.: 4 sachês por R$ 10; comprando 5, os 4 saem a R$ 10 e o 5º ao preço normal). Aplicadas automaticamente no caixa como desconto de linha (não exigem permissão de desconto do operador). Cadastro/edição só por administrador.</div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Produto</th><th>Tipo</th><th class="r">Preço normal</th><th class="r">Regra</th><th class="r">Preço promo</th><th>Ativa</th><th></th></tr></thead>
+          <tbody id="promoBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- AUDITORIA ---- -->
+    <div id="page-auditoria" class="page">
+      <div class="card pad">
+        <div class="head u-static-8"><h2>🔎 Auditoria</h2><span class="grow"></span>
+          <input id="auIni" type="date" class="in u-static-23">
+          <input id="auFim" type="date" class="in u-static-23">
+          <select id="auEntity" class="in u-static-38"><option value="">Todas as entidades</option></select>
+          <select id="auAction" class="in u-static-47"><option value="">Toda ação</option><option>INSERT</option><option>UPDATE</option><option>DELETE</option></select>
+          <input id="auQ" class="in u-static-48" placeholder="Buscar id/usuário…">
+          <button class="btn ghost" id="btnAuLoad">Atualizar</button>
+        </div>
+        <div class="pdv-note u-static-10">Cancelamentos, descontos, ajustes de estoque, caixa, financeiro, usuários e configuração. Clique numa linha para ver o detalhe (antes/depois).</div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Quando</th><th>Usuário</th><th>Ação</th><th>Entidade</th><th>ID</th><th>Loja</th></tr></thead>
+          <tbody id="auBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- ESTOQUE ---- -->
+    <div id="page-estoque" class="page">
+      <div class="card pad">
+        <div class="head"><h2>📦 Estoque &amp; produtos</h2><span class="grow"></span>
+          <input id="prodFilter" class="in u-static-48" placeholder="Buscar…">
+          <select id="prodCat" class="in u-static-23"><option value="">Todas categorias</option></select>
+          <button class="btn ghost" id="btnImportNfe">📄 Importar NF-e (XML)</button>
+          <button class="btn ghost" id="btnProdModel">⬇ Modelo CSV</button>
+          <button class="btn ghost" id="btnImport">↑ Importar CSV</button>
+          <button class="btn ghost" id="btnEntry">↧ Entrada</button>
+          <button class="btn" id="btnNewProd">+ Novo produto</button></div>
+        <input type="file" id="csvFile" accept=".csv,text/csv" class="hide">
+        <input type="file" id="xmlFile" accept=".xml,text/xml" class="hide">
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Produto</th><th>SKU</th><th>Categoria</th><th class="r">Preço</th><th class="r">Custo</th><th class="r">Estoque</th><th class="c">Tendência</th><th>Controle</th><th></th></tr></thead>
+          <tbody id="prodBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- CRM DO ESTOQUE ---- -->
+    <div id="page-estoquecrm" class="page">
+      <div id="stockCrm"></div>
+    </div>
+
+    <!-- ---- NF-e IMPORTADAS ---- -->
+    <div id="page-nfimport" class="page">
+      <div class="card pad">
+        <div class="head"><h2>📄 NF-e importadas</h2><span class="grow"></span>
+          <input id="nfeImpFilter" class="in u-static-42" placeholder="Buscar fornecedor / chave…">
+          <button class="btn ghost" id="btnNfeImpRefresh">↻ Atualizar</button></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Data</th><th>Fornecedor</th><th class="r">Itens</th><th class="c">Novos</th><th class="r">Total</th><th>Chave</th><th></th></tr></thead>
+          <tbody id="nfeImpBody"><tr><td colspan="7" class="muted u-static-49">Carregando…</td></tr></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- CREDIÁRIO ---- -->
+    <div id="page-crediario" class="page">
+      <div class="stats" id="credStats"></div>
+      <div class="card pad">
+        <div class="head"><h2>🧾 Contas a receber</h2><span class="grow"></span>
+          <input id="credSearch" class="in u-static-23" placeholder="Buscar cliente…">
+          <input id="credIni" type="date" class="in u-static-19" title="De">
+          <input id="credFim" type="date" class="in u-static-19" title="Até">
+          <select id="credFilter" class="in u-static-23">
+            <option value="">Todas em aberto</option><option value="vencer">A vencer</option><option value="vencidas">Vencidas</option><option value="pagas">✅ Já pagas</option>
+          </select>
+          <button class="btn ghost" id="btnCredMes">Mês atual</button>
+          <button class="btn" id="btnCredRefresh">Filtrar</button>
+          <span class="chip warn" id="credVencChip">0 vencidas</span></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Cliente</th><th>Venda</th><th>Parcela</th><th>Vencimento</th><th class="r">Valor</th><th>Status</th><th>Pagamento</th><th></th></tr></thead>
+          <tbody id="credBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- CRM DE CONTAS A RECEBER ---- -->
+    <div id="page-crediariocrm" class="page">
+      <div id="crmRecv"></div>
+    </div>
+
+    <!-- ---- A PAGAR ---- -->
+    <div id="page-pagar" class="page">
+      <div class="stats" id="payStats"></div>
+      <div class="card pad">
+        <div class="head u-static-8"><h2>💸 Contas a pagar</h2><span class="grow"></span>
+          <input id="payIni" type="date" class="in u-static-19" title="De">
+          <input id="payFim" type="date" class="in u-static-19" title="Até">
+          <select id="payStatus" class="in u-static-23">
+            <option value="abertas">Em aberto</option><option value="vencidas">Vencidas</option><option value="pagas">✅ Pagas</option><option value="">Todas</option>
+          </select>
+          <select id="payStore" class="in u-static-23"><option value="">Todas as lojas</option></select>
+          <button class="btn ghost" id="btnPayMes">Mês atual</button>
+          <button class="btn ghost" id="btnPayRefresh">Filtrar</button>
+          <button class="btn ghost" id="btnCashflow">📈 Fluxo projetado</button>
+          <button class="btn ghost" id="btnDre">📊 DRE</button>
+          <button class="btn ghost" id="btnSuppliers">🏭 Fornecedores</button>
+          <button class="btn" id="btnNewPayable">+ Nova conta</button></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr>
+            <th>Conta bancária</th><th>Status</th><th>Fornecedor</th><th>Loja</th><th>Vencimento</th>
+            <th class="r">Valor original</th><th class="r">Juros</th><th class="r">Total pago</th>
+            <th>Último pagamento</th><th>Categoria</th><th>Centro de custo</th><th></th></tr></thead>
+          <tbody id="payBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- CRM DE CONTAS A PAGAR ---- -->
+    <div id="page-pagarcrm" class="page">
+      <div id="crmPay"></div>
+    </div>
+
+    <!-- ---- TRANSFERÊNCIAS ---- -->
+    <div id="page-transfer" class="page">
+      <div class="card pad u-static-15">
+        <div class="head"><h2>🔄 Nova transferência (Modelo → loja)</h2></div>
+        <div class="grid2">
+          <div class="field"><label class="lbl">Loja de destino</label><select id="trDest" class="in"></select></div>
+          <div class="field"><label class="lbl">Buscar produto</label>
+            <div class="u-static-50"><input id="trSearch" class="in" placeholder="nome / SKU…" autocomplete="off"><div id="trRes" class="search-res hide"></div></div>
+          </div>
+        </div>
+        <div id="trCart" class="cart-list u-static-51"></div>
+        <p id="trEmpty" class="muted u-static-52">Adicione produtos ao pedido de transferência.</p>
+        <div class="u-static-53">
+          <b>Custo total: <span id="trTotal">R$ 0,00</span></b>
+          <button class="btn green" id="btnTrCreate">Gerar pedido de transferência</button>
+        </div>
+      </div>
+      <div class="card pad">
+        <div class="head u-static-8"><h2 class="u-static-6">Transferências</h2><span class="grow"></span>
+          <input id="trIni" type="date" class="in u-static-19" title="De">
+          <input id="trFim" type="date" class="in u-static-19" title="Até">
+          <button class="btn ghost" id="btnTrMes">Mês atual</button>
+          <button class="btn ghost" id="btnTrFilter">Filtrar</button></div>
+        <p class="muted u-static-20">Clique na linha para ver os itens, as quantidades e os valores.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>#</th><th>Data</th><th>Destino</th><th>Itens</th><th class="r">Custo</th><th>Status</th><th></th></tr></thead>
+          <tbody id="trBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- RELATÓRIO ---- -->
+    <div id="page-relatorio" class="page">
+      <div class="card pad u-static-15">
+        <div class="head u-static-24">
+          <h2>📊 Relatório</h2><span class="grow"></span>
+          <input id="repIni" class="in u-static-13" type="date">
+          <input id="repFim" class="in u-static-13" type="date">
+          <button class="btn" id="btnReport">Gerar</button>
+          <button class="btn ghost" id="btnAbc">📈 Curva ABC</button>
+        </div>
+        <div id="repResumo" class="muted">Selecione o período e clique em Gerar.</div>
+      </div>
+      <div class="card pad u-static-15">
+        <div class="head"><h2 class="u-static-6">🏠 Consolidado das lojas</h2><span class="grow"></span><span id="consPeriodo" class="muted u-static-7"></span></div>
+        <div class="stats" id="consGeral"></div>
+        <div class="stats" id="consLojas"></div>
+      </div>
+      <div id="repDetail" class="hide">
+        <div class="stats" id="repForma"></div>
+        <div class="erp-cols">
+          <div class="card pad">
+            <div class="head"><h2 class="u-static-6">Por operador</h2></div>
+            <div class="tbl-wrap"><table><thead><tr><th>Operador</th><th class="r">Vendas</th><th class="r">Total</th></tr></thead>
+              <tbody id="repOper"></tbody></table></div>
+          </div>
+          <div class="card pad">
+            <div class="head"><h2 class="u-static-6">Top produtos</h2></div>
+            <div class="tbl-wrap"><table><thead><tr><th>Produto</th><th class="r">Qtd</th><th class="r">Total</th></tr></thead>
+              <tbody id="repTop"></tbody></table></div>
+          </div>
+        </div>
+        <div class="card pad u-static-3">
+          <div class="head u-static-24"><h2 class="u-static-6">💳 Rentabilidade por pagamento</h2><span class="grow"></span><span id="repCardResumo" class="muted u-static-7"></span><button class="btn ghost sm" id="btnFeeRules">⚙️ Configurar taxas</button></div>
+          <div class="stats" id="repCardBandeiras"></div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th>Data</th><th>Venda</th><th>Meio</th><th>Bandeira / operadora</th><th>Terminal</th><th class="r">Bruto</th><th class="r">Taxa</th><th class="r">Antecipação</th><th class="r">Líquido</th><th>Recebimento</th><th class="r">Diferença</th><th class="r">Custo</th><th class="r">Lucro</th><th></th></tr></thead>
+            <tbody id="repCardBody"></tbody>
+          </table></div>
+        </div>
+      </div>
+      <div class="card pad u-static-3">
+        <div class="head"><h2 class="u-static-6">Últimas vendas (hoje)</h2></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>#</th><th>Hora</th><th>Cliente</th><th>Forma</th><th class="r">Total</th><th>Status</th><th></th></tr></thead>
+          <tbody id="salesBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+
+    <!-- ---- PREVENÇÃO DE PERDAS ---- -->
+    <div id="page-prevencao" class="page">
+      <div class="card pad">
+        <div class="head u-static-24"><div><h2>🚨 Prevenção de perdas e fraudes</h2><p class="muted">Descontos fora do padrão, cancelamentos, devoluções, ajustes de estoque e diferenças de caixa.</p></div><span class="grow"></span>
+          <input id="lossIni" class="in u-static-19" type="date"><input id="lossFim" class="in u-static-19" type="date">
+          <select id="lossStore" class="in u-static-48"></select>
+          <div class="field u-static-54"><label class="lbl">Alerta desconto ≥ %</label><input id="lossDiscount" class="in" value="15" inputmode="decimal"></div>
+          <button class="btn" id="btnLossLoad">Analisar</button></div>
+        <div class="stats" id="lossStats"></div>
+      </div>
+      <div class="card pad u-static-1"><div class="head"><h2 class="u-static-2">Risco por operador</h2></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Operador</th><th>Loja</th><th class="r">Vendas</th><th class="r">Cancelamentos</th><th class="r">Valor cancelado</th><th class="r">Descontos</th></tr></thead><tbody id="lossOperatorBody"></tbody></table></div></div>
+      <div class="card pad u-static-1"><div class="head"><h2 class="u-static-2">Alertas encontrados</h2></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Quando</th><th>Severidade</th><th>Tipo</th><th>Operador / loja</th><th>Ocorrência</th><th class="r">Valor</th><th>Status</th><th></th></tr></thead><tbody id="lossBody"></tbody></table></div></div>
+    </div>
+
+    <!-- ---- OPERAÇÕES 360 ---- -->
+    <div id="page-operacoes" class="page">
+      <div id="opsBanner" class="ops-banner hide"></div>
+      <div class="head u-static-24">
+        <div><h2>🛡️ Operações 360</h2><p class="muted">Segurança, automações, lotes, assinaturas e previsões.</p></div>
+        <span class="grow"></span>
+        <button class="btn ghost" id="btnOpsRefresh">↻ Atualizar</button>
+        <button class="btn green" id="btnOpsRun">▶ Executar automações</button>
+      </div>
+      <div class="stats" id="opsStats"></div>
+      <div class="ops-grid">
+        <section class="card pad ops-card">
+          <div class="head"><h2 class="u-static-2">❤️ Saúde das integrações</h2></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Serviço</th><th>Status</th><th>Última checagem</th><th>Mensagem</th></tr></thead>
+            <tbody id="opsHealthBody"></tbody></table></div>
+        </section>
+        <section class="card pad ops-card">
+          <div class="head"><h2 class="u-static-2">📦 Lotes e validade</h2><span class="grow"></span>
+            <button class="btn sm" id="btnOpsNewLot">+ Receber lote</button></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Produto / lote</th><th>Validade</th><th class="r">Livre</th><th>Status</th></tr></thead>
+            <tbody id="opsLotsBody"></tbody></table></div>
+        </section>
+        <section class="card pad ops-card">
+          <div class="head"><h2 class="u-static-2">📣 Cobrança automática</h2></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Vencimento</th><th class="r">Valor</th><th>Status</th></tr></thead>
+            <tbody id="opsCollectionsBody"></tbody></table></div>
+        </section>
+        <section class="card pad ops-card">
+          <div class="head"><h2 class="u-static-2">🔁 Assinaturas</h2><span class="grow"></span>
+            <button class="btn ghost sm" id="btnOpsNewPlan">+ Plano</button>
+            <button class="btn sm" id="btnOpsNewSub">+ Assinatura</button></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Próximo ciclo</th><th>Intervalo</th><th>Status</th></tr></thead>
+            <tbody id="opsSubscriptionsBody"></tbody></table></div>
+        </section>
+        <section class="card pad ops-card">
+          <div class="head"><h2 class="u-static-2">🧠 Inteligência e previsão</h2></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Loja</th><th class="r">Média/dia</th><th class="r">Previsão 30d</th><th class="r">Tendência</th></tr></thead>
+            <tbody id="opsForecastBody"></tbody></table></div>
+        </section>
+        <section class="card pad ops-card">
+          <div class="head"><h2 class="u-static-2">🧾 Cotações de compra</h2><span class="grow"></span>
+            <button class="btn sm" id="btnOpsNewQuote">+ Cotação</button></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Código</th><th>Prazo</th><th>Status</th><th>Criação</th></tr></thead>
+            <tbody id="opsQuotesBody"></tbody></table></div>
+        </section>
+        <section class="card pad ops-card">
+          <div class="head"><h2 class="u-static-2">💬 Solicitações do portal</h2></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Tipo</th><th>Status</th><th></th></tr></thead>
+            <tbody id="opsPortalBody"></tbody></table></div>
+        </section>
+      </div>
+      <section class="card pad u-static-3">
+        <div class="head"><h2 class="u-static-2">🔐 Auditoria recente</h2><span class="grow"></span>
+          <button class="btn ghost sm" id="btnOpsInvite">Convidar cliente para o portal</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Quando</th><th>Ação</th><th>Entidade</th><th>Registro</th><th>Usuário</th></tr></thead>
+          <tbody id="opsAuditBody"></tbody></table></div>
+      </section>
+    </div>
+
+    <!-- ---- CONFIG ---- -->
+    <div id="page-config" class="page">
+      <div class="card pad u-static-15" id="cardUsers">
+        <div class="head"><h2>👥 Operadores de caixa</h2><span class="grow"></span>
+          <button class="btn" id="btnUserNew">+ Novo operador</button>
+          <button class="btn ghost" id="btnUsersRefresh">↻ Atualizar</button></div>
+        <p class="muted u-static-55">
+          Crie a conta em <b>+ Novo operador</b> (e-mail + senha, entra na hora).
+          Nesta lista você define a <b>loja</b>, o <b>papel</b>, a <b>senha</b> e
+          <b>exatamente o que cada pessoa pode ver</b>. Conta desativada não consegue entrar.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Loja</th><th>Acessos</th><th>Status</th><th></th></tr></thead>
+          <tbody id="usersBody"></tbody></table></div>
+      </div>
+      <div class="card pad u-static-15" id="cardPdvTerminals">
+        <div class="head"><h2>🖥️ Caixas do PDV</h2><span class="grow"></span>
+          <button class="btn" id="btnPdvTerminalNew">+ Novo caixa</button>
+          <button class="btn ghost" id="btnPdvTerminalsRefresh">↻ Atualizar</button></div>
+        <p class="muted u-static-55">
+          Cadastre aqui cada computador de venda, o código usado para abrir o turno,
+          a impressora térmica e a largura da bobina. Este cadastro não aparece mais
+          dentro da frente de caixa.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Código</th><th>Nome</th><th>Impressora</th><th>Papel</th><th>Maquininha</th><th>Status</th><th></th></tr></thead>
+          <tbody id="pdvTerminalConfigBody"></tbody></table></div>
+      </div>
+      <div class="card pad u-static-15" id="cardPdvInstaller">
+        <div class="head"><h2>🛒 Instalador da Frente de Caixa</h2><span class="grow"></span>
+          <span class="chip ok">2026.08.25 · v33</span>
+          <a class="btn" href="downloads/onpdv-caixa.bat" download="onpdv-caixa.bat">⬇ Baixar ONPDV Caixa</a></div>
+        <p class="muted u-static-56">
+          Baixe este instalador em cada computador de venda. Ele instala o componente
+          local, cria o atalho <b>ONPDV Caixa</b> na Área de Trabalho com o ícone oficial
+          e prepara a impressão térmica direta.</p>
+      </div>
+      <div class="card pad u-static-15">
+        <div class="head"><h2>🏪 Lojas / Empresas</h2><span class="grow"></span>
+          <button class="btn" id="btnNewStore">+ Nova loja</button></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Nome</th><th>CNPJ</th><th>UF</th><th>Regime</th><th>Ambiente fiscal</th><th></th></tr></thead>
+          <tbody id="storeBody"></tbody></table></div>
+      </div>
+      <div class="card pad u-static-15">
+        <div class="head"><h2>🧾 Dados da empresa (recibo)</h2><span class="grow"></span>
+          <button class="btn" id="btnSaveCompany">Salvar</button></div>
+        <div class="grid2">
+          <div class="field"><label class="lbl">Nome / Razão social</label><input id="coNome" class="in"></div>
+          <div class="field"><label class="lbl">CNPJ</label><input id="coCnpj" class="in"></div>
+          <div class="field"><label class="lbl">Telefone</label><input id="coFone" class="in"></div>
+          <div class="field"><label class="lbl">Endereço</label><input id="coEnd" class="in"></div>
+        </div>
+        <div class="field"><label class="lbl">Rodapé do recibo</label><input id="coRodape" class="in"></div>
+      </div>
+      <div class="card pad">
+        <div class="head"><h2>💳 Maquininhas (Mercado Pago Point)</h2><span class="grow"></span>
+          <button class="btn" id="btnNewTerm">+ Nova maquininha</button></div>
+        <p class="muted u-static-55">Cadastre cada maquininha <b>Point</b> com o seu <b>Device ID</b>. No aparelho, ative o modo <b>PDV/Integrado</b> e copie o Device ID no app do vendedor do Mercado Pago. A cobrança (débito, crédito ou PIX) é enviada direto para o visor da maquininha pelo caixa.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Nome</th><th>Modelo</th><th>Device ID</th><th>Última atividade</th><th></th></tr></thead>
+          <tbody id="termBody"></tbody>
+        </table></div>
+      </div>
+
+      <div class="card pad u-static-3">
+        <div class="head"><h2>⚖️ Balança (etiqueta por peso)</h2><span class="grow"></span>
+          <button class="btn" id="btnSaveScale">Salvar</button></div>
+        <p class="muted u-static-55">Quando o produto é vendido por peso, a balança imprime uma etiqueta de código de barras (EAN-13) que já traz o <b>peso</b> ou o <b>preço</b> embutido. Configure abaixo conforme a sua balança (Toledo, Filizola, etc.). O código do produto na etiqueta deve bater com o <b>código de barras (EAN)</b> cadastrado no produto.</p>
+        <div class="grid2">
+          <div class="field"><label class="lbl">Ativar leitura de etiqueta de balança</label>
+            <select id="scAtiva" class="in"><option value="0">Desativada</option><option value="1">Ativada</option></select></div>
+          <div class="field"><label class="lbl">O que vem embutido na etiqueta</label>
+            <select id="scModo" class="in"><option value="peso">Peso (kg) — o PDV multiplica pelo preço/kg</option><option value="preco">Preço (R$) — a balança já calculou o valor</option></select></div>
+          <div class="field"><label class="lbl">Prefixo da etiqueta (1º dígito)</label><input id="scPrefixo" class="in" value="2" inputmode="numeric" maxlength="2"></div>
+          <div class="field"><label class="lbl">Dígitos do código do produto</label><input id="scCodLen" class="in" value="6" inputmode="numeric"></div>
+          <div class="field"><label class="lbl">Dígitos do valor/peso</label><input id="scValLen" class="in" value="5" inputmode="numeric"></div>
+          <div class="field"><label class="lbl">Casas decimais do valor/peso</label><input id="scValDec" class="in" value="3" inputmode="numeric"></div>
+        </div>
+        <p class="muted u-static-57">Exemplo: prefixo <b>2</b>, código <b>6</b> dígitos, valor <b>5</b> dígitos, <b>3</b> casas → <code>2</code>+<code>001234</code>+<code>01500</code>+dígito verificador = produto 001234 com 1,500 kg (modo peso) ou R$ 15,00 (modo preço, 2 casas). Ajuste com uma etiqueta real da sua balança.</p>
+      </div>
+
+      <div class="card pad u-static-3">
+        <div class="head"><h2>💳 Mercado Pago Point (maquininha integrada)</h2><span class="grow"></span>
+          <button class="btn" id="btnSaveMp">Salvar</button></div>
+        <p class="muted u-static-55">Device ID <b>global</b> usado quando a maquininha cadastrada não tem um Device ID próprio. Conecte a maquininha <b>Point Smart/Pro</b> à sua conta do Mercado Pago para que o PDV envie a cobrança direto para o visor dela. O <b>Access Token</b> fica guardado no servidor (secret <code>MP_ACCESS_TOKEN</code>), nunca no navegador — aqui você informa só o número de série (Device ID) do aparelho.</p>
+        <div class="grid2">
+          <div class="field"><label class="lbl">Ativar cobrança na Point pela API</label>
+            <select id="mpAtiva" class="in"><option value="0">Desativada</option><option value="1">Ativada</option></select></div>
+          <div class="field"><label class="lbl">Device ID (série da maquininha)</label><input id="mpDevice" class="in" placeholder="ex.: PAX_A910__SMARTPOS1234567890"></div>
+        </div>
+        <p class="muted u-static-57">Para pegar o Device ID: na maquininha, entre em <b>Configurações → Ponto de venda / Modo de operação</b> e ative o modo <b>PDV/Integrado</b>. O código aparece no app do vendedor do Mercado Pago. O Access Token de produção é definido no servidor com <code>supabase secrets set MP_ACCESS_TOKEN=...</code>.</p>
+      </div>
+
+      <div class="card pad u-static-3">
+        <div class="head"><h2>🎁 Cashback</h2><span class="grow"></span>
+          <button class="btn" id="btnSaveCashback">Salvar</button></div>
+        <label class="u-static-58">
+          <input class="u-static-59" type="checkbox" id="cfgCbAtivo">
+          Programa de cashback ativo</label>
+        <p class="muted u-static-55">Quando ativo, cada venda com <b>cliente identificado</b> credita cashback sobre o valor da compra. O saldo vira desconto no caixa. Desligado, nada muda nas vendas. <b>Vendas no crediário não geram cashback.</b></p>
+        <div class="grid2">
+          <div class="field"><label class="lbl">% de cashback por compra</label><input id="cfgCbPercent" class="in" inputmode="decimal" placeholder="ex.: 3"></div>
+          <div class="field"><label class="lbl">Validade do cashback (dias)</label><input id="cfgCbVal" class="in" inputmode="numeric" placeholder="ex.: 90"></div>
+          <div class="field"><label class="lbl">Compra mínima p/ creditar (R$)</label><input id="cfgCbMin" class="in" inputmode="decimal" placeholder="0,00"></div>
+        </div>
+        <p class="muted u-static-60">Esta é a <b>% base</b>, válida para todos. Campanhas segmentadas (aniversariantes, inativos, dobro etc.) continuam em <b>Clientes → 🎁 Cashback</b>.</p>
+      </div>
+
+      <div class="card pad u-static-3">
+        <div class="head"><h2>🏘️ Frete por bairro</h2><span class="grow"></span>
+          <button class="btn" id="btnFreteNew">+ Novo bairro</button></div>
+        <p class="muted u-static-55">Cadastre o valor do frete por bairro. Ao escolher o <b>bairro</b> no cadastro do cliente, o campo <b>frete</b> é preenchido automaticamente com o valor da tabela.</p>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Bairro</th><th class="r">Frete</th><th></th></tr></thead>
+          <tbody id="freteBody"></tbody></table></div>
+      </div>
+    </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="moto" class="hide">
+  <div class="moto-top">
+    <div class="moto-brand">🛵 ONPDV Entregas</div>
+    <span class="u-static-61" id="motoLoja"></span>
+  </div>
+  <div class="moto-body">
+    <div class="moto-hello">
+      <h2>🛵 Olá, <span id="motoName">—</span>!</h2>
+      <button class="moto-refresh" id="btnMotoRefresh">↻ Atualizar</button>
+    </div>
+    <div class="moto-geo" id="motoGeoStatus">📍 ativando localização…</div>
+    <button class="moto-scanbtn" id="btnScan">📷 Escanear etiqueta do pedido</button>
+    <div class="moto-search">
+      <span class="u-static-62">🔎</span>
+      <input id="motoManual" placeholder="…ou buscar pelo número do pedido" autocomplete="off">
+      <button class="btn ghost sm" id="btnMotoManual">Buscar</button>
+    </div>
+    <div class="moto-stats" id="motoStats"></div>
+    <div id="motoList"></div>
+    <button class="moto-exit" id="btnMotoLogout">Sair da conta</button>
+  </div>
+</div>
+<div id="scanOverlay" class="hide">
+  <video id="scanVideo" autoplay playsinline muted></video>
+  <div class="scan-frame"><p id="scanMsg">Aponte a câmera para o QR da guia…</p>
+    <button class="btn ghost scan-cancel" id="btnStopScan">Cancelar</button></div>
+</div>
+
+<div id="receiptPrint"></div>
+<div id="modalRoot"></div>
+<div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
