@@ -4785,13 +4785,19 @@ async function auEntities(){
   }catch(e){ console.error(e); }
 }
 async function auLoad(){
-  const { data, error }=await sb.rpc('erp_audit_list',{
+  const corePromise=sb.rpc('erp_audit_list',{
     p_ini:($('#auIni')&&$('#auIni').value)||null, p_fim:($('#auFim')&&$('#auFim').value)||null,
     p_entity:($('#auEntity')?$('#auEntity').value:'')||null,
     p_action:($('#auAction')?$('#auAction').value:'')||null,
     p_q:($('#auQ')?$('#auQ').value.trim():'')||null });
-  if(error){ toast('Erro: '+error.message,true); return; }
-  AUDIT_ROWS=data||[];
+  const [core,purchase]=await Promise.all([corePromise,purchaseFlowRpc('erp_purchase_workflow_audit_list',{p_limit:500},{silent:true})]);
+  if(core.error){ toast('Erro: '+core.error.message,true); return; }
+  const ini=($('#auIni')&&$('#auIni').value)||'',fim=($('#auFim')&&$('#auFim').value)||'',entity=($('#auEntity')&&$('#auEntity').value)||'',action=($('#auAction')&&$('#auAction').value)||'',q=((($('#auQ')&&$('#auQ').value)||'').trim().toLowerCase());
+  const purchaseRows=(purchase.data||[]).map(a=>({created_at:a.created_at,actor_nome:String(a.actor_id||'sistema').slice(0,8),action:a.action,entity_type:a.entity_type,entity_id:a.entity_id,loja_nome:'—',payload:a.details||{}})).filter(a=>{
+    const day=String(a.created_at||'').slice(0,10),hay=(a.action+' '+a.entity_type+' '+(a.entity_id||'')+' '+JSON.stringify(a.payload||{})).toLowerCase();
+    return (!ini||day>=ini)&&(!fim||day<=fim)&&(!entity||a.entity_type===entity)&&(!action||a.action===action)&&(!q||hay.includes(q));
+  });
+  AUDIT_ROWS=[...(core.data||[]),...purchaseRows].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
   const actLbl={INSERT:'<span class="chip ok">criou</span>',UPDATE:'<span class="chip amber">alterou</span>',DELETE:'<span class="chip warn">excluiu</span>'};
   $('#auBody').innerHTML = AUDIT_ROWS.length ? AUDIT_ROWS.map((a,idx)=>`
     <tr class="clickrow" data-onclick="auDetail(${idx})">
@@ -6989,16 +6995,87 @@ async function startScan(){
 window.stopScan=()=>{ if(scanRAF) cancelAnimationFrame(scanRAF); scanRAF=null; if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream=null; } $('#scanOverlay').classList.add('hide'); };
 
 // ======================= PEDIDO INTELIGENTE =======================
+const PURCHASE_FLOW_DEFAULTS={auto_approval_limit:0,price_increase_alert_percent:10,default_priority:'normal'};
+let PURCHASE_FLOW={enabled:false,config:{...PURCHASE_FLOW_DEFAULTS},rows:new Map()};
+function purchaseFlowMissing(error){
+  const code=String((error&&error.code)||''),msg=String((error&&error.message)||'').toLowerCase();
+  return code==='PGRST202'||code==='42883'||msg.includes('erp_purchase_')&&(msg.includes('not find')||msg.includes('does not exist'));
+}
+async function purchaseFlowRpc(name,args,opts){
+  const {data,error}=await sb.rpc(name,args||{});
+  if(error){
+    if(purchaseFlowMissing(error)){PURCHASE_FLOW.enabled=false;const b=$('#btnPurchaseFlow');if(b)b.classList.add('hide');return {data:null,error,missing:true};}
+    if(!(opts&&opts.silent))toast('Fluxo de compras: '+error.message,true);
+    return {data:null,error,missing:false};
+  }
+  PURCHASE_FLOW.enabled=true;
+  return {data,error:null,missing:false};
+}
+async function loadPurchaseWorkflowConfig(){
+  const r=await purchaseFlowRpc('erp_purchase_workflow_config',{}, {silent:true});
+  if(!r.error&&r.data)PURCHASE_FLOW.config={...PURCHASE_FLOW_DEFAULTS,...r.data};
+  const b=$('#btnPurchaseFlow');if(b)b.classList.toggle('hide',!(PURCHASE_FLOW.enabled&&isAdmin()));
+  return PURCHASE_FLOW.config;
+}
+async function purchaseWorkflowSaveMeta(orderId,meta){
+  if(!orderId)return null;
+  const r=await purchaseFlowRpc('erp_purchase_order_metadata_save',{p_order:String(orderId),p_metadata:meta||{}},{silent:true});
+  if(!r.error&&r.data)PURCHASE_FLOW.rows.set(String(orderId),r.data);
+  return r.data||null;
+}
+async function purchaseWorkflowLoadRows(ids){
+  const list=(ids||[]).filter(x=>x!=null).map(String);
+  if(!list.length){PURCHASE_FLOW.rows=new Map();return PURCHASE_FLOW.rows;}
+  const r=await purchaseFlowRpc('erp_purchase_order_workflow_list',{p_orders:list},{silent:true});
+  if(!r.error)PURCHASE_FLOW.rows=new Map((r.data||[]).map(x=>[String(x.order_id),x]));
+  return PURCHASE_FLOW.rows;
+}
+async function purchaseWorkflowContext(id){
+  const r=await purchaseFlowRpc('erp_purchase_order_context',{p_order:String(id)},{silent:true});
+  return (!r.error&&r.data)?r.data:{metadata:{},receipts:[],prices:[]};
+}
+async function purchaseWorkflowRecordApproval(id,type){
+  if(!id)return;
+  const detail=await sb.rpc('erp_po_detail',{p_po:id});if(detail.error||!detail.data)return;
+  const items=(detail.data.itens||[]).map(x=>({product_id:String(x.product_id),unit_price:+x.custo_unit||0}));
+  if(items.length)await purchaseFlowRpc('erp_purchase_approval_record',{p_order:String(id),p_items:items,p_approval_type:type},{silent:true});
+}
+function purchaseOrderId(data){return data&&(data.id||data.po_id||data.order_id||data.purchase_order_id)||null;}
+function purchaseApprovalLabel(meta){
+  if(!meta||!meta.approval_type)return '';
+  return meta.approval_type==='automatic'?'automática':meta.approval_type==='direct'?'direta':'manual';
+}
+async function purchaseFlowModal(){
+  await loadPurchaseWorkflowConfig();
+  if(!PURCHASE_FLOW.enabled){toast('A migration do fluxo de compras ainda não foi aplicada neste Supabase.',true);return;}
+  const ar=await purchaseFlowRpc('erp_purchase_price_alerts',{p_limit:8},{silent:true});
+  const alerts=(ar.data||[]).map(a=>{const p=PRODUCTS.find(x=>String(x.id)===String(a.product_id));return `<tr><td>${esc((p&&(p.nome||p.name))||a.product_id)}</td><td class="r">${BRL(a.previous_price)}</td><td class="r"><b>${BRL(a.current_price)}</b></td><td class="r neg">+${fmtNum(a.increase_percent)}%</td></tr>`;}).join('');
+  const c=PURCHASE_FLOW.config;
+  modal(`<div class="m-head"><h3>Regras do fluxo de compras</h3><button data-modal-close>✕</button></div>
+    <div class="m-body"><p class="muted">As regras complementam o Pedido inteligente sem alterar o fluxo de vendas.</p>
+      <div class="grid2"><div class="field"><label class="lbl">Aprovação automática até (R$)</label><input id="pwAuto" class="in" inputmode="decimal" value="${num(c.auto_approval_limit).toFixed(2).replace('.',',')}"></div>
+      <div class="field"><label class="lbl">Alerta de aumento de custo (%)</label><input id="pwAlert" class="in" inputmode="decimal" value="${num(c.price_increase_alert_percent).toFixed(2).replace('.',',')}"></div>
+      <div class="field"><label class="lbl">Prioridade padrão</label><select id="pwPriority" class="in">${['baixa','normal','alta','urgente'].map(x=>`<option value="${x}" ${x===c.default_priority?'selected':''}>${x}</option>`).join('')}</select></div></div>
+      <div class="tbl-wrap" style="margin-top:12px"><table><thead><tr><th>Alertas recentes de custo</th><th class="r">Anterior</th><th class="r">Atual</th><th class="r">Aumento</th></tr></thead><tbody>${alerts||'<tr><td colspan="4" class="muted" style="text-align:center">Nenhum aumento acima da regra.</td></tr>'}</tbody></table></div>
+    </div><div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="purchaseFlowSave()">Salvar regras</button></div>`,'wide');
+}
+window.purchaseFlowSave=async()=>{
+  const config={auto_approval_limit:Math.max(0,num($('#pwAuto').value)),price_increase_alert_percent:Math.max(0,num($('#pwAlert').value)),default_priority:$('#pwPriority').value};
+  const r=await purchaseFlowRpc('erp_purchase_workflow_config_save',{p_config:config});
+  if(r.error)return;PURCHASE_FLOW.config={...PURCHASE_FLOW_DEFAULTS,...r.data};closeModal();toast('Regras de compra atualizadas ✅');
+};
 function initSmartOrder(){
   const sup=$('#soSup'); if(sup) sup.innerHTML = '<option value="">Todos</option>' + SUPPLIERS.map(s=>`<option value="${s.id}">${esc(s.nome)}</option>`).join('');
   const st=$('#soStore'); if(st) st.innerHTML = STORES.map(s=>`<option value="${s.id}" ${s.id===CURRENT_STORE?'selected':''}>${esc(s.nome)}${s.is_matriz?' ★':''}</option>`).join('');
   const r=$('#soResult'); if(r) r.innerHTML='';
   const b=$('#btnSmartDrafts'); if(b)b.disabled=true;
   const sm=$('#soSummary'); if(sm)sm.textContent='Nenhuma sugestão calculada.';
+  loadPurchaseWorkflowConfig();
   loadPOs();
 }
 { const b=$('#btnSmartCalc'); if(b) b.onclick=calcSmartOrder; }
 { const b=$('#btnSmartDrafts'); if(b) b.onclick=smartCreateDrafts; }
+{ const b=$('#btnPurchaseFlow'); if(b) b.onclick=purchaseFlowModal; }
 let SMART=null;
 async function calcSmartOrder(){
   const store=$('#soStore').value||CURRENT_STORE, sup=$('#soSup').value||null;
@@ -7036,6 +7113,7 @@ function renderSmart(){
       </table></div>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost sm" data-onclick="smartRegister(${fi})">Compra direta (sem aprovação)</button>
+        <button class="btn ghost sm" data-onclick="smartQuotes(${fi})">💬 Cotações</button>
         <button class="btn ghost sm" data-onclick="smartCopy(${fi})">📋 Copiar pedido</button>
         <button class="btn ghost sm" data-onclick="smartPrint(${fi})">🖨️ Imprimir</button>
       </div>
@@ -7073,6 +7151,39 @@ window.smartPrint=fi=>{
     '<div class="ln"></div><div class="c" style="font-size:10px">'+new Date().toLocaleString('pt-BR')+'</div>';
   window.print();
 };
+window.smartQuotes=async fi=>{
+  const f=SMART&&SMART.fornecedores&&SMART.fornecedores[fi];
+  if(!f||!f.supplier_id){toast('Defina o fornecedor deste grupo antes de cotar.',true);return;}
+  const products=(f.itens||[]).map(x=>String(x.product_id));
+  const r=await purchaseFlowRpc('erp_purchase_quote_responses_list',{p_products:products,p_quote_ref:null});
+  if(r.error)return;
+  const responses=r.data||[],supplierName=id=>{const s=SUPPLIERS.find(x=>String(x.id)===String(id));return s?(s.nome||s.name||'Fornecedor'):'Fornecedor';};
+  const rows=(f.itens||[]).map((it,ii)=>{
+    const all=responses.filter(x=>String(x.product_id)===String(it.product_id));
+    const own=all.find(x=>String(x.supplier_id)===String(f.supplier_id));
+    const best=all.find(x=>x.is_best)||all.slice().sort((a,b)=>+a.unit_price-+b.unit_price)[0];
+    return `<tr><td><b>${esc(it.nome)}</b>${best?`<br><span class="muted">Melhor: ${esc(supplierName(best.supplier_id))} · ${BRL(best.unit_price)}</span>`:''}</td>
+      <td class="r"><input class="in" style="width:110px;text-align:right" inputmode="decimal" data-quote-price="${ii}" value="${num(own?own.unit_price:it.custo).toFixed(2).replace('.',',')}"></td>
+      <td class="r"><input class="in" style="width:80px;text-align:right" inputmode="numeric" data-quote-days="${ii}" value="${own?own.delivery_days:0}"></td></tr>`;
+  }).join('');
+  modal(`<div class="m-head"><h3>Cotações · ${esc(f.fornecedor)}</h3><button data-modal-close>✕</button></div><div class="m-body">
+    <p class="muted">Registre a resposta deste fornecedor. O melhor preço conhecido aparece como referência e os valores salvos serão aplicados ao cálculo atual.</p>
+    <div class="tbl-wrap"><table><thead><tr><th>Produto</th><th class="r">Preço cotado</th><th class="r">Entrega (dias)</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+    <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="smartQuotesSave(${fi})">Salvar e aplicar</button></div>`,'wide');
+};
+window.smartQuotesSave=async fi=>{
+  const f=SMART&&SMART.fornecedores&&SMART.fornecedores[fi];if(!f)return;
+  const quoteRef='smart:'+($('#soStore').value||CURRENT_STORE||'all'),items=[];
+  document.querySelectorAll('#modalRoot [data-quote-price]').forEach(inp=>{
+    const ii=+inp.dataset.quotePrice,it=f.itens[ii],days=$(`#modalRoot [data-quote-days="${ii}"]`),price=Math.max(0,num(inp.value));
+    if(price>0)items.push({quote_ref:quoteRef,product_id:String(it.product_id),supplier_id:String(f.supplier_id),unit_price:price,delivery_days:Math.max(0,parseInt(days&&days.value)||0)});
+  });
+  if(!items.length){toast('Informe ao menos um preço de cotação.',true);return;}
+  document.querySelectorAll(`#soResult input[data-f="${fi}"]`).forEach(inp=>{const it=f.itens[+inp.dataset.i];if(it)it.sugestao=Math.max(0,num(inp.value));});
+  const r=await purchaseFlowRpc('erp_purchase_quote_responses_save',{p_items:items});if(r.error)return;
+  items.forEach(q=>{const it=f.itens.find(x=>String(x.product_id)===q.product_id);if(it){it.custo=q.unit_price;it.custo_total=(+it.sugestao||0)*q.unit_price;}});
+  closeModal();renderSmart();toast(`${items.length} cotação(ões) salva(s) e aplicadas ✅`);
+};
 function smartItems(fi){
   const f=SMART.fornecedores[fi]; const items=[];
   document.querySelectorAll('#soResult input[data-f="'+fi+'"]').forEach(inp=>{
@@ -7089,6 +7200,8 @@ window.smartRegister=async fi=>{
   const store=$('#soStore').value||CURRENT_STORE;
   const { data, error }=await sb.rpc('erp_po_create',{ p_supplier:supplier_id, p_store:store, p_items:items, p_venc:null, p_obs:null });
   if(error){ toast('Erro: '+error.message,true); return; }
+  const orderId=purchaseOrderId(data);
+  if(orderId){await purchaseWorkflowSaveMeta(orderId,{store_id:String(store),supplier_id:String(supplier_id),buyer_name:(ME&&(ME.nome||ME.name))||null,priority:PURCHASE_FLOW.config.default_priority,approval_type:'direct',approved_at:new Date().toISOString()});await purchaseWorkflowRecordApproval(orderId,'direct');}
   toast('Compra registrada — conta a pagar prevista de '+BRL(data.total)+' ✅');
   loadPOs();
 };
@@ -7097,29 +7210,49 @@ async function smartCreateDrafts(){
   const b=$('#btnSmartDrafts');b.disabled=true;b.textContent='Criando rascunhos…';
   const store=$('#soStore').value||CURRENT_STORE,sup=$('#soSup').value||null;
   const dias=parseInt($('#soDias').value)||90,cob=parseInt($('#soCob').value)||30;
-  const {data,error}=await sb.rpc('erp_smart_order_create_drafts',{p_store:store,p_dias:dias,p_cobertura:cob,p_supplier:sup});
-  b.textContent='📝 Criar rascunhos para aprovação';b.disabled=false;
-  if(error){toast('Erro: '+error.message,true);return;}
-  toast(`${data.purchase_count||0} compra(s) e ${data.transfer_count||0} transferência(s) criadas como rascunho ✅`);
-  loadPOs();
+  try{
+    await loadPurchaseWorkflowConfig();
+    const before=await sb.rpc('erp_po_list',{p_status:'rascunho'}),beforeIds=new Set((before.data||[]).map(x=>String(x.id)));
+    const {data,error}=await sb.rpc('erp_smart_order_create_drafts',{p_store:store,p_dias:dias,p_cobertura:cob,p_supplier:sup});
+    if(error){toast('Erro: '+error.message,true);return;}
+    const after=await sb.rpc('erp_po_list',{p_status:'rascunho'}),created=(!before.error&&!after.error)?(after.data||[]).filter(x=>!beforeIds.has(String(x.id))):[];
+    let automatic=0;
+    for(const po of created){
+      const total=+po.total_previsto||0,auto=PURCHASE_FLOW.enabled&&+PURCHASE_FLOW.config.auto_approval_limit>0&&total<=+PURCHASE_FLOW.config.auto_approval_limit;
+      const base={store_id:String(store),supplier_id:po.supplier_id?String(po.supplier_id):null,buyer_name:(ME&&(ME.nome||ME.name))||null,priority:PURCHASE_FLOW.config.default_priority};
+      if(auto){
+        const approved=await sb.rpc('erp_po_approve',{p_po:po.id});
+        if(!approved.error){automatic++;await purchaseWorkflowSaveMeta(po.id,{...base,approval_type:'automatic',approved_at:new Date().toISOString()});await purchaseWorkflowRecordApproval(po.id,'automatic');continue;}
+      }
+      await purchaseWorkflowSaveMeta(po.id,base);
+    }
+    const suffix=automatic?` · ${automatic} aprovada(s) automaticamente`:'';
+    toast(`${data.purchase_count||0} compra(s) e ${data.transfer_count||0} transferência(s) criadas${suffix} ✅`);
+    await loadPOs();
+  }finally{
+    b.textContent='📝 Criar rascunhos para aprovação';b.disabled=false;
+  }
 }
 { const b=$('#btnPoRefresh'); if(b) b.onclick=loadPOs; const f=$('#poFilter'); if(f) f.onchange=loadPOs; }
 async function loadPOs(){
   const { data } = await sb.rpc('erp_po_list',{ p_status: ($('#poFilter')?$('#poFilter').value:'')||null });
   const rows=data||[];
+  await purchaseWorkflowLoadRows(rows.map(x=>x.id));
   const chip=s=>({rascunho:'<span class="chip amber">aguardando aprovação</span>',pendente:'<span class="chip amber">pendente</span>',parcial:'<span class="chip">parcial</span>',recebido:'<span class="chip ok">recebido</span>',cancelado:'<span class="chip warn">cancelado</span>'}[s]||s);
   $('#poBody').innerHTML = rows.length ? rows.map(r=>{
+    const flow=PURCHASE_FLOW.rows.get(String(r.id)),approval=purchaseApprovalLabel(flow);
     let acoes='';
     if(r.status==='rascunho') acoes='<button class="btn green sm" data-onclick="poApprove(\''+r.id+'\')">Aprovar</button> <button class="btn ghost sm red" data-onclick="poCancel(\''+r.id+'\')">Cancelar</button>';
     else if(r.status==='pendente'||r.status==='parcial') acoes='<button class="btn green sm" data-onclick="poReceive(\''+r.id+'\')">Receber</button> <button class="btn ghost sm red" data-onclick="poCancel(\''+r.id+'\')">Cancelar</button>';
     return '<tr class="clickrow" data-onclick="poDetail(\''+r.id+'\')"><td>'+new Date(r.created_at).toLocaleDateString('pt-BR')+'</td><td>'+esc(r.fornecedor||'—')+'</td><td>'+esc(r.loja||'—')+'</td>'+
-      '<td class="r">'+BRL(r.total_previsto)+'</td><td class="r">'+BRL(r.total_recebido)+'</td><td>'+chip(r.status)+'</td>'+
+      '<td class="r">'+BRL(r.total_previsto)+'</td><td class="r">'+BRL(r.total_recebido)+'</td><td>'+chip(r.status)+(approval?'<br><span class="muted" style="font-size:11px">aprovação '+esc(approval)+'</span>':'')+'</td>'+
       '<td class="r" style="white-space:nowrap" data-onclick="event.stopPropagation()">'+acoes+'</td></tr>';
   }).join('') : '<tr><td colspan="7" class="muted" style="text-align:center;padding:16px">Nenhuma compra registrada.</td></tr>';
 }
 window.poDetail = async id=>{
-  const { data:d } = await sb.rpc('erp_po_detail',{ p_po:id });
+  const [{data:d},flowCtx] = await Promise.all([sb.rpc('erp_po_detail',{ p_po:id }),purchaseWorkflowContext(id)]);
   if(!d){ toast('Compra não encontrada.',true); return; }
+  const flow=(flowCtx&&flowCtx.metadata)||{},receipts=(flowCtx&&flowCtx.receipts)||[];
   window._poPrint=d;
   const itens=(d.itens||[]).map(it=>{
     const qp=+it.qtd_pedida||0, qr=+it.qtd_recebida||0, cu=+it.custo_unit||0;
@@ -7130,6 +7263,8 @@ window.poDetail = async id=>{
   modal(`<div class="m-head"><h3>Compra — ${esc(d.fornecedor||'')}</h3><button data-modal-close>✕</button></div>
     <div class="m-body">
       <p class="muted" style="margin:0 0 6px">Loja <b>${esc(d.loja||'—')}</b> · criada em ${fmtDT(d.created_at)} · status <b>${esc(d.status)}</b>${d.received_at?` · recebida em ${fmtDT(d.received_at)}`:''}</p>
+      ${(flow.buyer_name||flow.delivery_on||flow.approval_type)?`<p class="muted" style="margin:0 0 6px">Solicitante <b>${esc(flow.buyer_name||'—')}</b> · prioridade <b>${esc(flow.priority||'normal')}</b> · aprovação <b>${esc(purchaseApprovalLabel(flow)||'pendente')}</b>${flow.delivery_on?` · entrega desejada ${fmtDate(flow.delivery_on)}`:''} · ${flow.installments||1} parcela(s)</p>`:''}
+      ${flow.decision_reason?`<p class="neg"><b>Justificativa:</b> ${esc(flow.decision_reason)}</p>`:''}
       ${d.obs?`<p class="muted">Obs: ${esc(d.obs)}</p>`:''}
       <div class="tbl-wrap"><table>
         <thead><tr><th>Produto</th><th class="r">Pedido</th><th class="r">Recebido</th><th class="r">Custo un.</th><th class="r">Custo total</th></tr></thead>
@@ -7139,6 +7274,7 @@ window.poDetail = async id=>{
         <div class="l"><span>Total previsto</span><b>${BRL(d.total_previsto)}</b></div>
         <div class="l big"><span>Total recebido</span><b>${BRL(d.total_recebido)}</b></div>
       </div>
+      ${receipts.length?`<div style="margin-top:10px"><b>Histórico de entregas</b>${receipts.map((r,i)=>`<p class="muted" style="margin:4px 0">Entrega ${receipts.length-i} · ${fmtDT(r.confirmed_at)} · ${BRL(r.total)} · ${esc(r.status||'registrada')}</p>`).join('')}</div>`:''}
     </div>
     <div class="m-foot">
       <button class="btn ghost" data-onclick="poPrint()">🖨️ Imprimir</button>
@@ -7160,10 +7296,11 @@ window.poReceive=async id=>{
   const { data:d } = await sb.rpc('erp_po_detail',{ p_po:id });
   if(!d){ toast('Compra não encontrada.',true); return; }
   modal('<div class="m-head"><h3>Receber compra — '+esc(d.fornecedor||'')+'</h3><button data-modal-close>✕</button></div>'+
-    '<div class="m-body"><p class="muted">Confirme a quantidade recebida (o estoque será atualizado).</p>'+
-    '<div class="tbl-wrap"><table><thead><tr><th>Produto</th><th class="r">Pedido</th><th class="r">Recebido</th></tr></thead><tbody>'+
-    d.itens.map(it=>'<tr><td>'+esc(it.descricao||'')+'</td><td class="r">'+(+it.qtd_pedida).toLocaleString('pt-BR')+'</td>'+
-      '<td class="r"><input class="in" style="width:80px;text-align:right;padding:5px 7px" value="'+(+it.qtd_pedida)+'" inputmode="decimal" data-pid="'+it.product_id+'"></td></tr>').join('')+
+    '<div class="m-body"><p class="muted">Informe somente esta entrega. O estoque e o histórico de custo serão atualizados; entregas parciais permanecem abertas.</p>'+
+    '<div class="tbl-wrap"><table><thead><tr><th>Produto</th><th class="r">Pedido</th><th class="r">Já recebido</th><th class="r">Restante</th><th class="r">Nesta entrega</th><th class="r">Preço recebido</th></tr></thead><tbody>'+
+    d.itens.map(it=>{const ordered=+it.qtd_pedida||0,received=+it.qtd_recebida||0,remaining=Math.max(0,ordered-received);return '<tr><td>'+esc(it.descricao||'')+'</td><td class="r">'+ordered.toLocaleString('pt-BR')+'</td><td class="r">'+received.toLocaleString('pt-BR')+'</td><td class="r"><b>'+remaining.toLocaleString('pt-BR')+'</b></td>'+
+      '<td class="r"><input class="in" style="width:80px;text-align:right;padding:5px 7px" value="'+remaining+'" inputmode="decimal" data-pid="'+it.product_id+'"></td>'+
+      '<td class="r"><input class="in" style="width:105px;text-align:right;padding:5px 7px" value="'+(+it.custo_unit||0).toFixed(2).replace('.',',')+'" inputmode="decimal" data-receive-price="'+it.product_id+'"></td></tr>';}).join('')+
     '</tbody></table></div></div>'+
     '<div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="poReceiveConfirm(\''+id+'\')">Dar entrada no estoque</button></div>');
 };
@@ -7171,32 +7308,47 @@ window.poApprove=async id=>{
   if(!await uiConfirm('Aprovar este rascunho? A conta a pagar será criada somente agora.',{okText:'Aprovar compra',cancelText:'Voltar'}))return;
   const {data,error}=await sb.rpc('erp_po_approve',{p_po:id});
   if(error){toast('Erro: '+error.message,true);return;}
+  await purchaseWorkflowSaveMeta(id,{approval_type:'manual',approved_at:new Date().toISOString(),buyer_name:(ME&&(ME.nome||ME.name))||null});
+  await purchaseWorkflowRecordApproval(id,'manual');
   toast('Compra aprovada · conta a pagar de '+BRL(data.total)+' criada ✅');loadPOs();
 };
 window.poDraftEdit=async id=>{
   const {data:d,error}=await sb.rpc('erp_po_detail',{p_po:id});
   if(error||!d){toast('Rascunho não encontrado.',true);return;}
+  const flowCtx=await purchaseWorkflowContext(id),flow=flowCtx.metadata||{};
   modal(`<div class="m-head"><h3>Revisar rascunho · ${esc(d.fornecedor||'')}</h3><button data-modal-close>✕</button></div>
     <div class="m-body"><p class="muted">Ajuste quantidade e custo antes de aprovar. Itens com zero não serão comprados.</p>
     <div class="tbl-wrap"><table><thead><tr><th>Produto</th><th class="r">Quantidade</th><th class="r">Custo</th></tr></thead><tbody>
     ${(d.itens||[]).map(i=>`<tr><td>${esc(i.descricao||'')}</td><td class="r"><input class="in" data-draft-pid="${i.product_id}" value="${+i.qtd_pedida||0}" style="width:85px;text-align:right"></td><td class="r"><input class="in" data-draft-cost="${i.product_id}" value="${+i.custo_unit||0}" style="width:100px;text-align:right"></td></tr>`).join('')}
-    </tbody></table></div></div><div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="poDraftSave('${id}')">Salvar revisão</button></div>`);
+    </tbody></table></div>
+    <div class="grid2" style="margin-top:12px"><div class="field"><label class="lbl">Solicitante</label><input id="poMetaBuyer" class="in" value="${esc(flow.buyer_name||(ME&&(ME.nome||ME.name))||'')}"></div>
+    <div class="field"><label class="lbl">Prioridade</label><select id="poMetaPriority" class="in">${['baixa','normal','alta','urgente'].map(x=>`<option value="${x}" ${x===(flow.priority||PURCHASE_FLOW.config.default_priority)?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="field"><label class="lbl">Entrega desejada</label><input id="poMetaDelivery" class="in" type="date" value="${esc(flow.delivery_on||'')}"></div>
+    <div class="field"><label class="lbl">Parcelas</label><input id="poMetaInstallments" class="in" inputmode="numeric" value="${flow.installments||1}"></div></div>
+    <div class="field"><label class="lbl">Observações internas</label><textarea id="poMetaNotes" class="in" rows="2">${esc(flow.notes||'')}</textarea></div>
+    </div><div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="poDraftSave('${id}')">Salvar revisão</button></div>`,'wide');
 };
 window.poDraftSave=async id=>{
   const items=[];document.querySelectorAll('[data-draft-pid]').forEach(q=>{const pid=q.dataset.draftPid,c=document.querySelector(`[data-draft-cost="${pid}"]`);items.push({product_id:pid,qtd:num(q.value)||0,custo:num(c&&c.value)||0});});
+  const metadata={buyer_name:($('#poMetaBuyer')||{}).value||null,priority:($('#poMetaPriority')||{}).value||PURCHASE_FLOW.config.default_priority,delivery_on:($('#poMetaDelivery')||{}).value||null,installments:Math.max(1,parseInt((($('#poMetaInstallments')||{}).value)||'1')||1),notes:($('#poMetaNotes')||{}).value||null};
   const {data,error}=await sb.rpc('erp_po_draft_update',{p_po:id,p_items:items});
-  if(error){toast('Erro: '+error.message,true);return;}closeModal();toast('Rascunho atualizado · '+BRL(data.total));loadPOs();
+  if(error){toast('Erro: '+error.message,true);return;}await purchaseWorkflowSaveMeta(id,metadata);closeModal();toast('Rascunho atualizado · '+BRL(data.total));loadPOs();
 };
 window.poReceiveConfirm=async id=>{
-  const items=[]; document.querySelectorAll('#modalRoot input[data-pid]').forEach(inp=>{ items.push({product_id:inp.dataset.pid, qtd_recebida:num(inp.value)||0}); });
+  const items=[],receiptItems=[]; document.querySelectorAll('#modalRoot input[data-pid]').forEach(inp=>{const qty=Math.max(0,num(inp.value)||0),price=$(`#modalRoot [data-receive-price="${inp.dataset.pid}"]`),unitPrice=Math.max(0,num(price&&price.value)||0);if(qty>0){items.push({product_id:inp.dataset.pid,qtd_recebida:qty});receiptItems.push({product_id:String(inp.dataset.pid),qtd_recebida:qty,unit_price:unitPrice});}});
+  if(!items.length){toast('Informe ao menos uma quantidade nesta entrega.',true);return;}
   const { data, error }=await sb.rpc('erp_po_receive',{ p_po:id, p_items:items });
   if(error){ toast('Erro: '+error.message,true); return; }
+  await purchaseFlowRpc('erp_purchase_receipt_record',{p_order:String(id),p_items:receiptItems,p_status:data.status},{silent:true});
   closeModal(); toast('Entrada registrada ✅ ('+data.status+')'); loadPOs(); loadProducts();
 };
 window.poCancel=async id=>{
+  const reason=await uiPrompt('Informe a justificativa para cancelar ou recusar esta compra:','',{title:'Justificativa obrigatória',okText:'Continuar'});
+  if(reason===null)return;if(!reason.trim()){toast('A justificativa é obrigatória.',true);return;}
   if(!await uiConfirm('Cancelar esta compra? A conta a pagar prevista será cancelada.',{danger:true,okText:'Cancelar compra',cancelText:'Voltar'})) return;
   const { error }=await sb.rpc('erp_po_cancel',{ p_po:id });
   if(error){ toast('Erro: '+error.message,true); return; }
+  await purchaseWorkflowSaveMeta(id,{decision_reason:reason.trim(),rejected_at:new Date().toISOString(),buyer_name:(ME&&(ME.nome||ME.name))||null});
   toast('Compra cancelada'); loadPOs();
 };
 

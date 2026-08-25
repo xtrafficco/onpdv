@@ -1,4 +1,4 @@
-ONPDV v33 - PACOTE PARA PUBLICACAO
+ONPDV v35 - PACOTE PARA PUBLICACAO
 Data: 25/08/2026
 
 Envie TODO o conteúdo desta pasta para a raiz do site, mantendo exatamente
@@ -9,11 +9,11 @@ partials, lib, icons e downloads. Publicar somente os arquivos da raiz deixa
 o index.html sem cores e impede o carregamento do sistema.
 
 Arquivo inicial: index.html
-Cache PWA: onpdv-v33
+Cache PWA: onpdv-v35
 Instalador do caixa: downloads/onpdv-caixa.bat
 
 SHA-256 do pacote interno do instalador:
-FC78C3E513F49C964CA632ECF8525C67C4F62C910FBB044B23DAB0E06D3D8E3B
+6931556B0F91CCE2F3FA392AF30FC5CE206D2E2E69C4474864D5F218385BC1FD
 
 Não envie as pastas node_modules, tests, test-results ou supabase para a
 hospedagem estática. As migrations do Supabase são administradas separadamente

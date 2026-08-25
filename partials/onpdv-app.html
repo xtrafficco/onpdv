@@ -337,7 +337,7 @@
     <!-- ---- PEDIDO INTELIGENTE ---- -->
     <div id="page-pedidoint" class="page">
       <div class="card pad">
-        <div class="head"><h2>🧠 Pedido inteligente</h2><span class="muted u-static-7">Considera calendário de vendas, sazonalidade, prazo real, segurança, lotes, promoções e saldo das outras lojas.</span></div>
+        <div class="head"><h2>🧠 Pedido inteligente</h2><span class="muted u-static-7">Considera calendário de vendas, sazonalidade, prazo real, segurança, lotes, promoções e saldo das outras lojas.</span><span class="grow"></span><button class="btn ghost sm hide" id="btnPurchaseFlow">⚙ Regras de compra</button></div>
         <div class="grid2">
           <div class="field"><label class="lbl">Fornecedor</label><select id="soSup" class="in"><option value="">Todos</option></select></div>
           <div class="field"><label class="lbl">Loja</label><select id="soStore" class="in"></select></div>
@@ -355,7 +355,7 @@
       <div class="u-static-1" id="soResult"></div>
       <div class="card pad u-static-3">
         <div class="head"><h2 class="u-static-2">🧾 Compras registradas</h2><span class="grow"></span>
-          <select id="poFilter" class="in u-static-23"><option value="">Todas</option><option value="rascunho">Rascunhos</option><option value="pendente">Pendentes</option><option value="parcial">Parciais</option><option value="recebido">Recebidas</option></select>
+          <select id="poFilter" class="in u-static-23"><option value="">Todas</option><option value="rascunho">Rascunhos</option><option value="pendente">Pendentes</option><option value="parcial">Parciais</option><option value="recebido">Recebidas</option><option value="cancelado">Canceladas</option></select>
           <button class="btn ghost sm" id="btnPoRefresh">Atualizar</button></div>
         <div class="tbl-wrap"><table>
           <thead><tr><th>Data</th><th>Fornecedor</th><th>Loja</th><th class="r">Previsto</th><th class="r">Recebido</th><th>Status</th><th></th></tr></thead>
@@ -945,7 +945,7 @@
       </div>
       <div class="card pad u-static-15" id="cardPdvInstaller">
         <div class="head"><h2>🛒 Instalador da Frente de Caixa</h2><span class="grow"></span>
-          <span class="chip ok">2026.08.25 · v33</span>
+          <span class="chip ok">2026.08.25 · v35</span>
           <a class="btn" href="downloads/onpdv-caixa.bat" download="onpdv-caixa.bat">⬇ Baixar ONPDV Caixa</a></div>
         <p class="muted u-static-56">
           Baixe este instalador em cada computador de venda. Ele instala o componente
