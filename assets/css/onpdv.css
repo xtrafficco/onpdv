@@ -104,7 +104,7 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.3px;color:var(--ink2);padding:8px 10px;border-bottom:2px solid var(--line);white-space:nowrap}
 td{padding:9px 10px;border-bottom:1px solid var(--line)}
 tr:hover td{background:#f7f9ff}
-.tbl-wrap{overflow:auto;border-radius:var(--r-sm);overscroll-behavior:contain}
+.tbl-wrap{overflow:auto;border-radius:var(--r-sm);overscroll-behavior-x:contain;overscroll-behavior-y:auto}
 .neg{color:var(--red);font-weight:800}
 .low td{background:#fff8e6}
 
@@ -384,7 +384,7 @@ body.pdv-mode .topbar{display:none!important}
 body.pdv-mode #app,body.pdv-mode .page{padding:0;margin:0;max-width:none}
 body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 .pdv{--brand:#3b7de0;--p-bg:#12307a;--p-dark:#0b1f52;--p-line:#2a4da8;--p-soft:#1d3f96;
-  --p-side:274px;--p-pad:14px;--p-gap:10px;
+  --p-side:274px;--p-pad:14px;--p-gap:10px;--p-foot-pad-y:8px;
   position:fixed;inset:0;display:flex;flex-direction:column;background:var(--p-bg);
   color:#fff;font-family:'Nunito',sans-serif;font-size:14px}
 .pdv *{box-sizing:border-box}
@@ -404,7 +404,7 @@ body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 .pdv-logo{flex:none;width:96px;height:96px;border-radius:50%;background:#fff;display:grid;place-items:center;overflow:hidden}
 .pdv-logo img{width:88%;height:auto;object-fit:contain}
 .pdv-body{flex:1;display:flex;min-height:0;padding-right:var(--p-pad)}
-.pdv-side{width:var(--p-side);flex:none;display:flex;flex-direction:column;padding:0 var(--p-gap) 4px var(--p-pad);gap:10px;overflow:auto}
+.pdv-side{width:var(--p-side);flex:none;display:flex;flex-direction:column;padding:0 var(--p-gap) var(--p-foot-pad-y) var(--p-pad);gap:10px;overflow:auto}
 .pdv-work{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
 .pdv-side .fld{flex:none}
 .pdv-keys{margin-top:auto;display:grid;grid-template-columns:1fr 1fr;gap:6px;padding-top:10px}
@@ -429,7 +429,7 @@ body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 .pdv-empty{padding:40px 16px;text-align:center;color:#8a99bd;font-size:15px;line-height:1.7;
   width:100%;max-width:640px;margin-inline:auto;box-sizing:border-box}
 .pdv-foot{flex:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(340px,3.75fr);
-  align-items:stretch;gap:6px;padding:8px 0;background:var(--p-bg)}
+  align-items:stretch;gap:6px;padding:var(--p-foot-pad-y) 0;background:var(--p-bg)}
 .pdv-foot>.cell{min-width:0}.pdv-foot>.cell:not(.total) .pdv-lbl{min-height:25px;display:flex;align-items:flex-end;font-size:16px;line-height:1.1}
 .pdv-foot>.cell:not(.total) .pdv-in{padding:7px 10px;font-size:17px}
 .pdv-foot .cell.total{display:flex;align-items:center;justify-content:flex-end;
@@ -522,10 +522,10 @@ body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 .pdv-quick-grid .wide{grid-column:1/-1}
 @media(max-width:620px){.pdv-delivery-pay-grid,.pdv-quick-grid{grid-template-columns:1fr}.pdv-quick-grid .wide{grid-column:auto}}
 @media(max-width:1050px){
-  .pdv{--p-side:220px;--p-pad:10px}
+  .pdv{--p-side:220px;--p-pad:10px;--p-foot-pad-y:7px}
   .pdv-head{padding:8px var(--p-pad)}.pdv-logo{width:72px;height:72px}
-  .pdv-side{padding:0 var(--p-gap) 8px var(--p-pad)}.pdv-key{padding:7px 5px;font-size:11px}
-  .pdv-grid table{min-width:720px}.pdv-foot{grid-template-columns:repeat(3,minmax(0,1fr)) minmax(260px,3fr);padding:7px 0}
+  .pdv-side{padding-inline:var(--p-pad) var(--p-gap)}.pdv-key{padding:7px 5px;font-size:11px}
+  .pdv-grid table{min-width:720px}.pdv-foot{grid-template-columns:repeat(3,minmax(0,1fr)) minmax(260px,3fr)}
   .pdv-foot>.cell:not(.total) .pdv-lbl{font-size:13px}.pdv-foot>.cell:not(.total) .pdv-in{font-size:14px;padding-inline:6px}
 }
 @media(max-width:820px){
@@ -565,27 +565,27 @@ body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 /* Telas baixas (ex.: 1366x768 com barra de tarefas + chrome do navegador → viewport ~600-680px).
    Compacta cabeçalho, coluna de teclas e rodapé para caber sem barras de rolagem. */
 @media (max-height:760px){
+  .pdv{--p-foot-pad-y:5px}
   .pdv-head{padding:6px var(--p-pad) 7px}
   .pdv-logo{width:72px;height:72px}
   .pdv-cons{font-size:16px;margin-bottom:4px}
   .pdv-lbl{margin-bottom:1px;font-size:12px}
   .pdv-in{padding:6px 10px;font-size:15px}
-  .pdv-side{gap:6px;padding-bottom:6px}
+  .pdv-side{gap:6px}
   .pdv-keys{padding-top:6px;gap:5px}
   .pdv-key{padding:5px 6px;font-size:11px}
   .pdv-key.wide{min-height:28px}
-  .pdv-foot{padding:5px 0}
   .pdv-foot>.cell:not(.total) .pdv-lbl{min-height:18px;font-size:13px}
   .pdv-foot>.cell:not(.total) .pdv-in{padding:5px 10px;font-size:15px}
   .pdv-foot .cell.total{font-size:26px;padding:4px 16px}
 }
 @media (min-width:821px) and (max-height:620px){
-  .pdv{--p-side:clamp(205px,20vw,250px);--p-pad:8px;--p-gap:6px}
+  .pdv{--p-side:clamp(205px,20vw,250px);--p-pad:8px;--p-gap:6px;--p-foot-pad-y:2px}
   .pdv-head{padding:3px var(--p-pad) 4px}.pdv-cons{font-size:13px;margin-bottom:1px}.pdv-logo{display:none}
   .pdv-lbl{font-size:9px;margin-bottom:0}.pdv-in{padding:3px 6px;font-size:12px;min-height:26px}
-  .pdv-side{gap:3px;padding-bottom:2px}.pdv-keys{gap:3px;padding-top:2px}.pdv-key{padding:2px 4px;font-size:9px;min-height:23px}.pdv-key span{font-size:9px}.pdv-key.wide{min-height:23px}
+  .pdv-side{gap:3px}.pdv-keys{gap:3px;padding-top:2px}.pdv-key{padding:2px 4px;font-size:9px;min-height:23px}.pdv-key span{font-size:9px}.pdv-key.wide{min-height:23px}
   .pdv-grid table{font-size:11px}.pdv-grid th,.pdv-grid td{padding:4px 6px}
-  .pdv-foot{padding:2px 0;gap:3px}.pdv-foot>.cell:not(.total) .pdv-lbl{min-height:10px;font-size:9px}.pdv-foot>.cell:not(.total) .pdv-in{padding:3px 6px;font-size:12px}.pdv-foot .cell.total{font-size:20px;padding:2px 9px}.pdv-foot .cell.total small{font-size:9px}
+  .pdv-foot{gap:3px}.pdv-foot>.cell:not(.total) .pdv-lbl{min-height:10px;font-size:9px}.pdv-foot>.cell:not(.total) .pdv-in{padding:3px 6px;font-size:12px}.pdv-foot .cell.total{font-size:20px;padding:2px 9px}.pdv-foot .cell.total small{font-size:9px}
   .pdv-bar{padding:2px 8px;min-height:25px;font-size:9px;gap:6px}.pdv-action{padding:3px 5px;font-size:9px}
 }
 @media print{
