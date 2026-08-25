@@ -187,9 +187,18 @@ h1,h2,h3{font-family:'Fredoka',sans-serif;font-weight:600;letter-spacing:-.3px}
 .cfg button{padding:11px 18px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.1);color:var(--ink);font-weight:700;cursor:pointer}
 .cfg button.pri{background:var(--accent);color:#3a2a00;border:none}
 .hint{font-size:12px;opacity:.7;line-height:1.4}
+/* A vitrine começa focada na identificação. Quando a venda começa, o
+   teclado deixa de ocupar espaço e o cliente acompanha somente a compra. */
+body.mode-idle .cust,
+body.mode-idle .cart{display:none}
+body.mode-idle .main{justify-content:center}
+body.mode-idle .pad{width:min(100%,420px)}
+body.mode-cart .cust{display:none}
+body.mode-cart .pad,
+body.mode-customer .pad{display:none}
 </style>
 </head>
-<body>
+<body class="mode-idle">
 <div class="wrap">
   <div class="top">
     <div class="logo">🐾</div>
@@ -327,10 +336,19 @@ function resetIdentity(){ identified=false; cpf=''; paintCpf(); setMsg('');
   $('#reid').style.display='none'; $('#keys').style.display=''; $('#go').style.display=''; $('#pad').querySelector('.ttl').style.display='';
 }
 
+function applyLayout(items, customer){
+  const hasCustomer=!!(customer && customer.name);
+  const mode=(items.length||hasCustomer) ? (hasCustomer?'mode-customer':'mode-cart') : 'mode-idle';
+  document.body.classList.remove('mode-idle','mode-cart','mode-customer');
+  document.body.classList.add(mode);
+}
+
 // ===== render carrinho + cliente =====
 function renderState(st){
   st=st||{};
   const items=Array.isArray(st.items)?st.items:[];
+  const cu=st.cust;
+  applyLayout(items,cu);
   if(items.length) hidePay();   // nova venda em andamento → tira qualquer card de pagamento
   const box=$('#items');
   if(!items.length){
@@ -349,7 +367,6 @@ function renderState(st){
   }
   $('#total').textContent=BRL(st.total||0);
 
-  const cu=st.cust;
   const cust=$('#cust');
   if(cu && cu.name){
     identified=true; clearTimeout(window._cpfTo);
