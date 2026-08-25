@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#12307a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ONPDV Cliente">
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self'; base-uri 'self'; object-src 'none';
+  script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src 'self' https://fonts.gstatic.com;
+  img-src 'self' data: blob:;
+  connect-src 'self' https://qkhpvqepgozsaamxmugk.supabase.co wss://qkhpvqepgozsaamxmugk.supabase.co https://viacep.com.br;
+  frame-src 'none'; form-action 'self';">
+<title>ONPDV · Meu portal</title>
+<link rel="manifest" href="cliente.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&amp;family=Nunito:wght@400;600;700;800&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8"
+  integrity="sha384-Tve8O+C6PBzsIMK/IRCwHbi8fyEzXIlIs6OfVBZHubplwYhaQF/4Mzxqgg+pp/oy"
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<style>
+:root{--dark:#12307a;--dark2:#0e2660;--bg:#f7f8fa;--card:#fff;--ink:#1c2333;--muted:#7a869f;--line:#e4e7ee;--accent:#ffcf3f;--green:#22a65a;--red:#d94b45;--focus:#5e6ad2;--toph:56px;--navh:74px}
+*{box-sizing:border-box}
+html,body{margin:0;scrollbar-width:none;-ms-overflow-style:none;touch-action:manipulation;overscroll-behavior:none}
+html::-webkit-scrollbar,body::-webkit-scrollbar,#app::-webkit-scrollbar,.body::-webkit-scrollbar{display:none;width:0;height:0}
+body{background:var(--dark);color:var(--ink);font-family:Nunito,sans-serif;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.hide{display:none!important}.grow{flex:1}.muted{color:var(--muted)}
+button,input,select,textarea{font:inherit}
+
+/* App = tela de celular, centralizada no desktop */
+#app{max-width:480px;margin:0 auto;min-height:100vh;min-height:100dvh;background:var(--bg);display:flex;flex-direction:column;box-shadow:0 0 40px rgba(0,0,0,.35)}
+
+.top{background:var(--dark);color:#fff;height:var(--toph);padding:0 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;z-index:10}
+.brand{font:700 20px Fredoka}.brand b{background:var(--accent);color:var(--dark);padding:1px 6px;border-radius:6px}
+.iconbtn{background:rgba(255,255,255,.16);color:#fff;border:0;border-radius:10px;padding:9px 13px;font-weight:800;font-size:13px;cursor:pointer}
+
+.hero{background:linear-gradient(135deg,var(--dark),#3159b5);color:#fff;padding:12px 16px 14px;position:sticky;top:var(--toph);z-index:9;box-shadow:0 7px 18px rgba(8,26,72,.18)}
+.hero h1{font:600 22px Fredoka;margin:0}
+.hero p{margin:3px 0 0;opacity:.85;font-size:13px}
+
+/* Menu principal fixo na parte inferior */
+.chips{position:fixed;left:50%;bottom:0;transform:translateX(-50%);z-index:12;background:#fff;display:grid;grid-template-columns:repeat(4,1fr);width:min(480px,100%);height:calc(var(--navh) + env(safe-area-inset-bottom));padding:7px 8px env(safe-area-inset-bottom);border-top:1px solid var(--line);box-shadow:0 -8px 26px rgba(18,48,122,.12)}
+.tab{position:relative;border:0;background:transparent;color:var(--muted);border-radius:13px;padding:7px 4px;font-weight:800;font-size:11px;line-height:1.1;white-space:nowrap;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;transition:.15s}
+.tab .ico{font-size:21px;line-height:1}
+.tab:active{transform:scale(.96)}
+.tab.active{background:#e8eefc;color:var(--dark)}
+.tab .bdg{position:absolute;top:2px;left:calc(50% + 8px);background:var(--red);color:#fff;border-radius:99px;min-width:18px;height:18px;padding:0 5px;font-size:10px;font-weight:900;display:inline-grid;place-items:center}
+
+.body{flex:1;padding:16px 16px calc(var(--navh) + 24px + env(safe-area-inset-bottom))}
+.sec{display:none}.sec.active{display:block;animation:fade .2s ease}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 6px 18px rgba(18,48,122,.06);margin-bottom:14px}
+.card:last-child{margin-bottom:0}
+.card h2{font:600 18px Fredoka;margin:0 0 12px;display:flex;align-items:center;gap:8px}.htot{margin-left:auto;font:700 15px Nunito}
+
+/* Saldo cashback em destaque */
+.balance{background:linear-gradient(135deg,#116b3a,var(--green));color:#fff;border-radius:16px;padding:20px 18px;text-align:center;margin-bottom:14px;box-shadow:0 10px 26px rgba(34,166,90,.28)}
+.balance small{font-weight:800;opacity:.9;text-transform:uppercase;letter-spacing:.5px;font-size:11px}
+.balance b{display:block;font:700 40px Fredoka;margin:4px 0 2px;line-height:1}
+.balance .exp{display:inline-block;margin-top:8px;background:rgba(255,255,255,.2);border-radius:99px;padding:4px 11px;font-size:12px;font-weight:800}
+
+.btn{border:0;border-radius:11px;background:var(--dark);color:#fff;padding:0 16px;min-height:44px;font-weight:800;cursor:pointer}.btn:active{transform:scale(.97)}.btn:disabled{opacity:.5}
+.btn.ghost{background:#fff;color:var(--dark);border:1px solid var(--line)}.btn.red{background:var(--red)}.btn.sm{min-height:38px;padding:0 13px;font-size:13px}.btn.block{width:100%}
+.in{width:100%;border:1.5px solid var(--line);border-radius:11px;padding:12px;outline:none;font-size:16px}.in:focus{border-color:var(--focus);box-shadow:0 0 0 3px rgba(94,106,210,.15)}
+label{display:block;color:var(--muted);font-size:12px;font-weight:800;margin:11px 0 5px}
+.row{display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);align-items:center}.row:first-child{padding-top:0}.row:last-child{border:0;padding-bottom:0}
+.chip{display:inline-block;border-radius:99px;padding:3px 9px;font-size:11px;font-weight:900;background:#e8eefc;color:var(--dark)}.chip.ok{background:#e3f6ec;color:var(--green)}.chip.warn{background:#fdeceb;color:var(--red)}
+.petcard{border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px;background:#fbfcff}.petcard:last-child{margin-bottom:0}
+.pethead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px}.pethead b{font:600 17px Fredoka}
+.petmeta{color:var(--muted);font-size:12px;margin:3px 0 10px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.actions .btn{flex:1}
+.empty{color:var(--muted);text-align:center;padding:12px 6px;margin:0}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}.formgrid .wide{grid-column:1/-1}
+.sheet-actions{display:flex;gap:8px;margin-top:16px}.sheet-actions .btn{flex:1}
+.cashback-earned{display:inline-block;margin-top:5px;color:var(--green);font-size:12px;font-weight:900}
+
+#login{min-height:100vh;min-height:100dvh;display:grid;place-items:center;background:linear-gradient(145deg,var(--dark),#081a48);padding:18px}
+#login .box{background:#fff;width:min(400px,100%);border-radius:20px;padding:26px;box-shadow:0 25px 60px #0006}
+#login h1{text-align:center;font:700 28px Fredoka;margin:0}.msg{min-height:20px;text-align:center;color:var(--red);font-size:13px;margin-top:10px}
+.toast{position:fixed;left:50%;bottom:calc(var(--navh) + 14px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--dark2);color:#fff;border-radius:12px;padding:12px 18px;font-weight:800;opacity:0;pointer-events:none;transition:.2s;z-index:99}.toast.show{opacity:1}
+.modal{position:fixed;inset:0;background:rgba(8,20,50,.55);display:none;align-items:flex-end;justify-content:center;z-index:20}.modal.show{display:flex}
+.sheet{background:#fff;width:100%;max-width:480px;border-radius:20px 20px 0 0;padding:20px 18px calc(22px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.3);animation:up .22s ease;max-height:92vh;overflow:auto;overscroll-behavior:contain}
+@keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
+.sheet h3{font:600 21px Fredoka;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+.qrimg{width:216px;height:216px;object-fit:contain;display:block;margin:14px auto;border:1px solid var(--line);border-radius:12px;background:#fff}
+.pixcode{width:100%;border:1.5px solid var(--line);border-radius:10px;padding:10px;font-size:12px;height:64px;resize:none;font-family:monospace}
+.pwa-install-login{margin:0 0 14px;background:#f5f7ff;color:var(--dark);border-color:#cfd9f4}
+.pwa-install-login::before{content:'📲';margin-right:7px}
+.install-intro{color:var(--muted);font-size:13px;line-height:1.45;margin:5px 0 14px}
+.install-steps{display:grid;gap:10px;margin:15px 0}
+.install-step{display:flex;gap:11px;align-items:flex-start;background:#f5f7ff;border:1px solid var(--line);border-radius:13px;padding:11px 12px;color:var(--ink);font-size:14px;line-height:1.35}
+.install-step b{background:var(--dark);color:#fff;display:grid;place-items:center;flex:0 0 25px;height:25px;border-radius:50%;font-size:12px}
+.install-note{background:#fff6d8;border:1px solid #f2d675;border-radius:12px;padding:10px 12px;color:#5c4b12;font-size:13px;line-height:1.4}
+</style>
+</head>
+<body>
+<section id="login">
+  <div class="box">
+    <h1><span style="background:#ffcf3f;color:#12307a;padding:1px 8px;border-radius:8px">ON</span>PDV</h1>
+    <p class="muted" style="text-align:center">Portal do cliente</p>
+    <button id="pwaInstallLogin" type="button" class="btn ghost block pwa-install-login hide">Instalar aplicativo</button>
+    <label for="email">E-mail</label><input id="email" class="in" type="email" autocomplete="username">
+    <label for="password">Senha</label><input id="password" class="in" type="password" autocomplete="current-password">
+    <button id="enter" class="btn" style="width:100%;margin-top:15px">Entrar</button>
+    <p id="loginMsg" class="msg"></p>
+    <p class="muted" style="font-size:12px;text-align:center">O acesso é liberado por convite da loja.</p>
+  </div>
+</section>
+<main id="app" class="hide">
+  <header class="top"><div class="brand"><b>ON</b>PDV</div><span class="grow"></span><button id="pwaInstallApp" type="button" class="iconbtn hide">📲 Instalar</button><button id="logout" class="iconbtn">Sair</button></header>
+  <section class="hero"><h1>Olá, <span id="firstName">cliente</span>! 👋</h1><p>Seu cashback, contas e a carteira do seu pet.</p></section>
+
+  <nav class="chips" id="nav" aria-label="Menu principal">
+    <button class="tab active" data-sec="home"><span class="ico">🏠</span><span>Início</span><span class="bdg hide" id="contasBadge"></span></button>
+    <button class="tab" data-sec="orders"><span class="ico">🛍️</span><span>Compras</span></button>
+    <button class="tab" data-sec="pets"><span class="ico">🐾</span><span>Carteirinha</span></button>
+    <button class="tab" data-sec="profile"><span class="ico">👤</span><span>Dados</span></button>
+  </nav>
+
+  <div class="body">
+    <section class="sec active" id="sec-home">
+      <div id="cashback"></div>
+      <div class="card"><h2>⚠️ Vencidas <span class="htot" id="overdueTot" style="color:var(--red)"></span></h2><div id="overdue"></div></div>
+      <div class="card"><h2>📅 A vencer <span class="htot" id="upcomingTot"></span></h2><div id="upcoming"></div></div>
+      <div class="card"><h2>🔁 Minhas assinaturas</h2><div id="subscriptions"></div></div>
+      <div class="card"><h2>📄 Extrato do cashback</h2><div id="cashbackEntries"></div></div>
+    </section>
+
+    <section class="sec" id="sec-orders"><div class="card"><h2>🛍️ Histórico de compras</h2><div id="orders"></div></div></section>
+
+    <section class="sec" id="sec-pets"><div class="card">
+      <h2>🐾 Carteirinha dos pets <span class="grow"></span><button class="btn sm" type="button" onclick="openPetForm()">+ Pet</button></h2>
+      <p class="muted" style="font-size:13px;margin:-4px 0 14px">Cadastre dados, vacinas, vermífugos e outros cuidados.</p>
+      <div id="pets"></div>
+    </div></section>
+
+    <section class="sec" id="sec-profile"><div class="card"><h2>👤 Meus dados</h2>
+      <label for="phone">Telefone</label><input id="phone" class="in" inputmode="tel">
+      <label for="profileEmail">E-mail</label><input id="profileEmail" class="in" type="email" autocomplete="email">
+      <label for="cep">CEP</label>
+      <div style="display:flex;gap:8px"><input id="cep" class="in" inputmode="numeric" maxlength="9" placeholder="00000-000" autocomplete="postal-code"><button type="button" id="btnCep" class="btn ghost" style="flex:0 0 auto">Buscar</button></div>
+      <label for="num">Número / complemento</label><input id="num" class="in" inputmode="numeric" placeholder="nº, apto, bloco…">
+      <label for="address">Endereço</label><textarea id="address" class="in" rows="2"></textarea>
+      <label for="bairro">Bairro</label><input id="bairro" class="in">
+      <button id="saveProfile" class="btn block" style="margin-top:14px">Salvar dados</button>
+      <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+      <label for="newPassword">Definir ou alterar senha</label><input id="newPassword" class="in" type="password" minlength="10" autocomplete="new-password" placeholder="Mínimo de 10 caracteres">
+      <button id="savePassword" class="btn ghost block" style="margin-top:12px">Salvar nova senha</button>
+    </div></section>
+  </div>
+</main>
+<div id="pixModal" class="modal"><div class="sheet" id="pixSheet"></div></div>
+<div id="trackingModal" class="modal"><div class="sheet" id="trackingSheet"></div></div>
+<div id="petModal" class="modal"><form class="sheet" id="petForm">
+  <h3>🐾 <span id="petFormTitle">Adicionar pet</span></h3>
+  <p class="muted" style="margin:2px 0 8px">Preencha as informações que ajudam a cuidar do seu pet.</p>
+  <input id="petId" type="hidden">
+  <div class="formgrid">
+    <div class="wide"><label for="petName">Nome *</label><input id="petName" class="in" maxlength="80" required></div>
+    <div><label for="petSpecies">Espécie</label><input id="petSpecies" class="in" list="petSpeciesList" maxlength="40" placeholder="Ex.: Cão"></div>
+    <div><label for="petBirthday">Aniversário</label><input id="petBirthday" class="in" type="date"></div>
+    <div><label for="petBreed">Raça</label><input id="petBreed" class="in" maxlength="80"></div>
+    <div><label for="petSize">Porte</label><input id="petSize" class="in" list="petSizeList" maxlength="30" placeholder="Ex.: Médio"></div>
+    <div><label for="petSex">Sexo</label><input id="petSex" class="in" list="petSexList" maxlength="30" placeholder="Ex.: Fêmea"></div>
+    <div><label for="petWeight">Peso (kg)</label><input id="petWeight" class="in" type="number" min="0" max="200" step="0.01" inputmode="decimal"></div>
+    <div class="wide"><label for="petNotes">Observações</label><textarea id="petNotes" class="in" rows="3" maxlength="1000" placeholder="Alergias, alimentação, medicamentos, preferências…"></textarea></div>
+  </div>
+  <datalist id="petSpeciesList"><option value="Cão"><option value="Gato"><option value="Ave"><option value="Roedor"><option value="Outro"></datalist>
+  <datalist id="petSizeList"><option value="Pequeno"><option value="Médio"><option value="Grande"><option value="GG"></datalist>
+  <datalist id="petSexList"><option value="Fêmea"><option value="Macho"><option value="Não informado"></datalist>
+  <div class="sheet-actions"><button class="btn ghost" type="button" onclick="closeModal('petModal')">Cancelar</button><button class="btn" type="submit">Salvar pet</button></div>
+</form></div>
+<div id="healthModal" class="modal"><form class="sheet" id="healthForm">
+  <h3>🩺 <span id="healthFormTitle">Adicionar cuidado</span></h3>
+  <p class="muted" id="healthPetName" style="margin:2px 0 8px"></p>
+  <input id="healthId" type="hidden"><input id="healthPetId" type="hidden">
+  <label for="healthType">Tipo *</label><select id="healthType" class="in" required><option value="vacina">Vacina</option><option value="vermifugo">Vermífugo</option><option value="antipulgas">Antipulgas</option><option value="consulta">Consulta</option><option value="exame">Exame</option><option value="medicamento">Medicamento</option><option value="outro">Outro</option></select>
+  <label for="healthDescription">Descrição *</label><input id="healthDescription" class="in" maxlength="120" required placeholder="Ex.: V10, antirrábica, vermífugo…">
+  <div class="formgrid">
+    <div><label for="healthApplied">Data realizada</label><input id="healthApplied" class="in" type="date"></div>
+    <div><label for="healthNext">Próxima dose/data</label><input id="healthNext" class="in" type="date"></div>
+    <div class="wide"><label for="healthNotes">Observações</label><textarea id="healthNotes" class="in" rows="3" maxlength="1000"></textarea></div>
+  </div>
+  <div class="sheet-actions"><button class="btn ghost" type="button" onclick="closeModal('healthModal')">Cancelar</button><button class="btn" type="submit">Salvar cuidado</button></div>
+</form></div>
+<div id="pwaInstallModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="pwaInstallTitle"><div class="sheet" id="pwaInstallSheet"></div></div>
+<div id="toast" class="toast"></div>
+<script>
+const SUPABASE_URL='https://qkhpvqepgozsaamxmugk.supabase.co';
+const SUPABASE_KEY='sb_publishable_rh5Whcvb9PFt9MI1iL6dlg_qS9BGRNw';
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=s=>document.querySelector(s);
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const BRL=n=>(Number(n)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const date=v=>v?new Date(String(v).slice(0,10)+'T12:00:00-03:00').toLocaleDateString('pt-BR'):'—';
+const TODAY=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo'}).format(new Date());
+const isoDay=v=>v?String(v).slice(0,10):null;
+const daysUntil=v=>{const d=isoDay(v);if(!d)return null;return Math.round((new Date(d+'T12:00:00-03:00')-new Date(TODAY+'T12:00:00-03:00'))/864e5);};
+const CB_KIND={earn:'Ganho',redeem:'Resgate',adjust:'Ajuste',expire:'Expirado'};
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('show'),2600);}
+
+// ===== Instalação do Portal do Cliente (PWA) =====
+let PWA_INSTALL_PROMPT=null;
+const PWA_UA=navigator.userAgent||'';
+const PWA_IOS=/iPad|iPhone|iPod/.test(PWA_UA)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+const PWA_ANDROID=/Android/i.test(PWA_UA);
+const PWA_SAFARI=/Safari/i.test(PWA_UA)&&!/CriOS|FxiOS|EdgiOS|OPiOS/i.test(PWA_UA);
+function pwaIsInstalled(){
+  return window.matchMedia('(display-mode: standalone)').matches
+    ||window.matchMedia('(display-mode: fullscreen)').matches
+    ||navigator.standalone===true;
+}
+function refreshPwaInstallUi(){
+  const show=!pwaIsInstalled();
+  ['pwaInstallLogin','pwaInstallApp'].forEach(id=>{const el=$('#'+id);if(el)el.classList.toggle('hide',!show);});
+}
+function closePwaInstall(){closeModal('pwaInstallModal');}
+function pwaInstallHelp(){
+  let title='Instalar o Portal do Cliente',intro='',steps=[],note='';
+  if(PWA_IOS){
+    title='Instalar no iPhone ou iPad';
+    intro='O iOS instala aplicativos pela opção da Tela de Início do Safari.';
+    if(!PWA_SAFARI)note='Esta página foi aberta em outro navegador. Primeiro escolha “Abrir no Safari” e continue por lá.';
+    steps=['No Safari, toque no botão Compartilhar (quadrado com seta para cima).','Role as opções e toque em “Adicionar à Tela de Início”.','Confirme em “Adicionar”. O ícone ONPDV aparecerá junto aos seus aplicativos.'];
+  }else if(PWA_ANDROID){
+    title='Instalar no Android';
+    intro='Você pode deixar o Portal do Cliente na tela inicial e abrir como aplicativo.';
+    steps=['Abra esta página no Google Chrome.','Toque no menu ⋮ no canto superior direito.','Escolha “Instalar app” ou “Adicionar à tela inicial” e confirme.'];
+    note='Se o QR Code abriu dentro de WhatsApp, Instagram ou outro aplicativo, use o menu desse aplicativo e escolha “Abrir no Chrome”.';
+  }else{
+    steps=['Abra o menu do navegador.','Escolha “Instalar aplicativo” ou “Adicionar à tela inicial”.','Confirme a instalação.'];
+  }
+  $('#pwaInstallSheet').innerHTML=`<h3 id="pwaInstallTitle">📲 ${esc(title)}</h3><p class="install-intro">${esc(intro)}</p>`
+    +(note?`<div class="install-note">${esc(note)}</div>`:'')
+    +`<div class="install-steps">${steps.map((s,i)=>`<div class="install-step"><b>${i+1}</b><span>${esc(s)}</span></div>`).join('')}</div>`
+    +'<button class="btn block" type="button" onclick="closePwaInstall()">Entendi</button>';
+  $('#pwaInstallModal').classList.add('show');
+}
+async function requestPwaInstall(){
+  if(pwaIsInstalled()){toast('O aplicativo já está instalado.');refreshPwaInstallUi();return;}
+  if(PWA_INSTALL_PROMPT){
+    const prompt=PWA_INSTALL_PROMPT;
+    PWA_INSTALL_PROMPT=null;
+    await prompt.prompt();
+    const choice=await prompt.userChoice.catch(()=>null);
+    if(choice&&choice.outcome==='accepted')toast('Instalação iniciada ✅');
+    else pwaInstallHelp();
+    refreshPwaInstallUi();
+    return;
+  }
+  pwaInstallHelp();
+}
+window.addEventListener('beforeinstallprompt',event=>{
+  event.preventDefault();
+  PWA_INSTALL_PROMPT=event;
+  refreshPwaInstallUi();
+});
+window.addEventListener('appinstalled',()=>{
+  PWA_INSTALL_PROMPT=null;
+  refreshPwaInstallUi();
+  closePwaInstall();
+  toast('ONPDV instalado com sucesso ✅');
+});
+window.matchMedia('(display-mode: standalone)').addEventListener?.('change',refreshPwaInstallUi);
+['pwaInstallLogin','pwaInstallApp'].forEach(id=>$('#'+id).addEventListener('click',requestPwaInstall));
+refreshPwaInstallUi();
+
+function showSec(name){
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.sec===name));
+  document.querySelectorAll('.sec').forEach(s=>s.classList.toggle('active',s.id==='sec-'+name));
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('.tab');if(b)showSec(b.dataset.sec);});
+let DATA=null;
+async function load(){
+  const {data,error}=await sb.rpc('portal_dashboard');
+  if(error){await sb.auth.signOut();$('#app').classList.add('hide');$('#login').classList.remove('hide');$('#loginMsg').textContent='Este acesso ainda não está vinculado a um cliente.';return;}
+  DATA=data||{};const p=DATA.profile||{};
+  $('#login').classList.add('hide');$('#app').classList.remove('hide');$('#firstName').textContent=String(p.name||'cliente').split(/\s+/)[0];
+  $('#phone').value=p.phone||'';$('#profileEmail').value=p.email||'';$('#address').value=p.address||'';$('#bairro').value=p.bairro||'';
+  const rec=DATA.receivables||[],subs=DATA.subscriptions||[],orders=DATA.orders||[];
+  const cb=DATA.cashback||{},pets=DATA.pets||[];
+  const overdue=rec.filter(x=>isoDay(x.due_on)&&isoDay(x.due_on)<TODAY);
+  const upcoming=rec.filter(x=>!(isoDay(x.due_on)&&isoDay(x.due_on)<TODAY));
+  const sum=a=>a.reduce((s,x)=>s+(+x.amount||0),0);
+
+  // Início: saldo, contas, assinaturas e extrato
+  const entries=cb.entries||[];
+  $('#cashback').innerHTML=`<div class="balance"><small>Saldo de cashback</small><b>${BRL(cb.balance||0)}</b>`
+    +((+cb.expiring_30d>0)?`<span class="exp">⏳ ${BRL(cb.expiring_30d)} expiram em 30 dias</span>`:`<span class="exp">Use como desconto na loja</span>`)
+    +'</div>';
+  $('#cashbackEntries').innerHTML=entries.length?entries.map(e=>{const pos=(+e.amount||0)>=0;return `<div class="row"><div><b>${esc(CB_KIND[e.kind]||e.kind)}</b><br><span class="muted">${date(e.created_at)}${e.expires_at?' · expira '+date(e.expires_at):''}</span></div>
+      <b style="color:${pos?'var(--green)':'var(--red)'};white-space:nowrap">${pos?'+':'−'} ${BRL(Math.abs(+e.amount||0))}</b></div>`;}).join(''):'<p class="muted">Ainda sem movimentações de cashback.</p>';
+
+  // Totais e aviso das contas
+  $('#overdueTot').textContent=overdue.length?BRL(sum(overdue)):'';
+  $('#upcomingTot').textContent=upcoming.length?BRL(sum(upcoming)):'';
+  const badge=$('#contasBadge');
+  if(overdue.length){badge.textContent=overdue.length;badge.classList.remove('hide');}else{badge.classList.add('hide');}
+
+  // Carteirinha editável pelo cliente
+  $('#pets').innerHTML=pets.length?pets.map(pet=>{
+    const idade=pet.nascimento?Math.max(0,Math.floor(-daysUntil(pet.nascimento)/365)):null;
+    const saude=(pet.saude||[]);
+    const items=saude.map(h=>{
+      const d=daysUntil(h.proxima_em);
+      let chip='';
+      if(d!=null){chip=d<0?`<span class="chip warn">atrasada</span>`:(d<=30?`<span class="chip warn">em ${d} dia${d===1?'':'s'}</span>`:`<span class="chip ok">em dia</span>`);}
+      return `<div class="row"><div><b>${esc(healthLabel(h.tipo))}${h.descricao?' · '+esc(h.descricao):''}</b><br><span class="muted">${h.aplicada_em?'realizada '+date(h.aplicada_em):'data não informada'}${h.proxima_em?' · próxima '+date(h.proxima_em):''}</span></div><div style="text-align:right">${chip}<br><button class="btn ghost sm" style="margin-top:5px" type="button" onclick="openHealthForm('${pet.id}','${h.id}')">Editar</button></div></div>`;
+    }).join('');
+    return `<div class="petcard">
+      <div class="pethead"><div><b>🐾 ${esc(pet.nome||'Pet')}</b><div class="petmeta">${esc([pet.especie,pet.raca,pet.porte,pet.sexo].filter(Boolean).join(' · '))}${idade!=null?' · '+idade+' ano'+(idade===1?'':'s'):''}${pet.peso?' · '+esc(pet.peso)+' kg':''}</div></div>
+        <button class="btn ghost sm" type="button" onclick="openPetForm('${pet.id}')">Editar pet</button>
+      </div>${pet.obs?`<p class="muted" style="font-size:13px;margin:0 0 10px">${esc(pet.obs)}</p>`:''}
+      ${items||'<p class="muted" style="margin:8px 0">Nenhum cuidado registrado ainda.</p>'}
+      <div class="actions" style="margin-top:12px"><button class="btn sm" type="button" onclick="openHealthForm('${pet.id}')">+ Vacina ou cuidado</button></div></div>`;
+  }).join(''):'<div class="empty">Nenhum pet cadastrado ainda.<br>Toque em <b>+ Pet</b> para começar. 🐶🐱</div>';
+
+  // Contas vencidas / a vencer
+  const recRow=x=>{const d=daysUntil(x.due_on),over=isoDay(x.due_on)<TODAY;
+    return `<div class="row"><div><b>${BRL(x.amount)}</b> <span class="chip ${over?'warn':''}">${over?'venceu '+date(x.due_on):'vence '+date(x.due_on)}</span><br>
+      <span class="muted">parcela ${esc(x.installment||'')}/${esc(x.installments||'')}${x.sale_number?' · venda #'+esc(x.sale_number):''}${over&&d!=null?' · '+(-d)+' dia'+(d===-1?'':'s')+' em atraso':''}</span></div>
+      <button class="btn ${over?'red':''}" onclick="payReceivable('${x.id}')">Pagar</button></div>`;};
+  $('#overdue').innerHTML=overdue.length?overdue.map(recRow).join(''):'<p class="muted">Nenhuma conta vencida. 🎉</p>';
+  $('#upcoming').innerHTML=upcoming.length?upcoming.map(recRow).join(''):'<p class="muted">Nenhuma conta a vencer.</p>';
+
+  $('#subscriptions').innerHTML=subs.map(x=>`<div class="row"><div><b>${esc(x.plan_name||'Assinatura')}</b><br><span class="muted">próximo ciclo ${date(x.next_run_on)} · ${x.interval_days} dias</span></div>
+    <div><span class="chip ${x.status==='active'?'ok':'warn'}">${esc(x.status)}</span><br>
+    ${x.status==='cancelled'?'':`<button class="btn ghost" style="margin-top:5px" onclick="setSub('${x.id}','${x.status==='active'?'paused':'active'}')">${x.status==='active'?'Pausar':'Retomar'}</button>`}</div></div>`).join('')||'<p class="muted">Nenhuma assinatura ativa.</p>';
+  const ordChip=s=>{const k=String(s||'').toLowerCase();return k==='paga'||k==='pago'?'ok':(k==='cancelada'?'warn':'');};
+  $('#orders').innerHTML=orders.map(x=>{const d=x.delivery||null;const dl={aguardando_pagamento:'aguardando pagamento',fila:'na fila de entrega',em_rota:'saiu para entrega',entregue:'entregue',cancelada:'cancelada'};return `<div class="row" style="align-items:flex-start"><div><b>Pedido #${esc(x.numero)}</b> <span class="chip ${ordChip(x.status)}">${esc(x.status)}</span>${d?` <span class="chip ${d.status==='entregue'?'ok':d.status==='cancelada'?'warn':''}">🚚 ${esc(dl[d.status]||d.status)}</span>`:''}<br><span class="muted">${date(x.created_at)} · ${esc(x.forma_pagamento||'')}</span>${d&&d.status==='em_rota'?`<br><b style="color:var(--green)">Previsão: ${d.eta_minutes?'aprox. '+d.eta_minutes+' min':date(d.eta_arrival)}</b>`:''}<br><span class="cashback-earned">🎁 Cashback ganho: ${BRL(x.cashback_earned||0)}</span><div id="oi_${x.id}" class="muted" style="font-size:13px;margin-top:6px"></div></div><div style="text-align:right;white-space:nowrap"><b>${BRL(x.total)}</b>${d&&['fila','em_rota'].includes(d.status)?`<br><button class="btn sm" style="margin-top:6px" type="button" onclick="trackDelivery('${x.id}')">📍 Acompanhar</button>`:''}<br><button class="btn ghost sm" style="margin-top:6px" type="button" onclick="orderItems('${x.id}')">Ver itens</button><br><button class="btn ghost sm" style="margin-top:6px" type="button" onclick="reorder('${x.id}',this)">🔄 Comprar de novo</button></div></div>`;}).join('')||'<p class="muted">Nenhuma compra encontrada.</p>';
+}
+window.orderItems=async id=>{
+  const box=document.getElementById('oi_'+id); if(!box) return;
+  if(box.dataset.open==='1'){ box.innerHTML=''; box.dataset.open='0'; return; }
+  box.textContent='Carregando itens…';
+  const {data,error}=await sb.rpc('portal_order_items',{p_sale:id});
+  if(error){ box.textContent='Não foi possível carregar os itens.'; return; }
+  const its=data||[];
+  box.innerHTML = its.length ? its.map(i=>`• ${esc(i.descricao||'Item')} — ${(+i.qtd||0)}× ${BRL(i.preco_unit||0)}`).join('<br>') : 'Sem itens detalhados neste pedido.';
+  box.dataset.open='1';
+};
+window.trackDelivery=async id=>{
+  const sheet=$('#trackingSheet');$('#trackingModal').classList.add('show');sheet.innerHTML='<h3>📍 Acompanhar entrega</h3><p class="muted">Atualizando localização e previsão…</p>';
+  const {data:d,error}=await sb.rpc('portal_delivery_tracking',{p_sale:id});
+  if(error){sheet.innerHTML=`<h3>📍 Acompanhar entrega</h3><p style="color:var(--red)">${esc(error.message||'Não foi possível carregar.')}</p><button class="btn ghost block" onclick="closeModal('trackingModal')">Fechar</button>`;return;}
+  const labels={fila:'Pedido na fila da loja',em_rota:'Pedido a caminho',entregue:'Pedido entregue',cancelada:'Entrega cancelada',aguardando_pagamento:'Aguardando pagamento'};
+  const eta=d.eta_arrival?new Date(d.eta_arrival).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):null;
+  const updated=d.courier_updated_at?new Date(d.courier_updated_at).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):null;
+  const map=d.courier_lat!=null?`https://www.google.com/maps/search/?api=1&query=${d.courier_lat},${d.courier_lng}`:null;
+  sheet.innerHTML=`<h3>🚚 Pedido #${esc(d.numero||'')}</h3><p><span class="chip ${d.status==='entregue'?'ok':''}">${esc(labels[d.status]||d.status)}</span></p>
+    ${d.status==='em_rota'?`<div class="balance" style="margin:12px 0"><small>Previsão de chegada</small><b>${d.eta_minutes?'aprox. '+d.eta_minutes+' min':(eta||'calculando…')}</b><span class="exp">${d.eta_distance_km?Number(d.eta_distance_km).toLocaleString('pt-BR',{maximumFractionDigits:1})+' km restantes':''}</span></div>`:''}
+    <p class="muted"><b>Endereço:</b> ${esc(d.address||'—')}<br>${d.courier?`Entregador: <b>${esc(d.courier)}</b>`:''}${updated?` · posição atualizada às ${updated}`:''}</p>
+    <div class="sheet-actions">${map?`<a class="btn" target="_blank" href="${map}">Abrir no mapa</a>`:''}<button class="btn ghost" onclick="trackDelivery('${id}')">Atualizar</button></div>
+    <button class="btn ghost block" style="margin-top:8px" onclick="closeModal('trackingModal')">Fechar</button>`;
+};
+window.reorder=async (id,btn)=>{
+  if(btn){ btn.disabled=true; btn.textContent='Enviando…'; }
+  const {error}=await sb.rpc('portal_reorder_request',{p_sale:id});
+  if(error){ toast(error.message||'Não foi possível enviar o pedido.'); if(btn){ btn.disabled=false; btn.textContent='🔄 Comprar de novo'; } return; }
+  if(btn){ btn.textContent='✅ Enviado à loja'; }
+  toast('Pedido de recompra enviado à loja! Em breve entram em contato. 🐾');
+};
+function closeModal(id){$('#'+id).classList.remove('show');}
+function healthLabel(tipo){return ({vacina:'Vacina',vermifugo:'Vermífugo',antipulgas:'Antipulgas',consulta:'Consulta',exame:'Exame',medicamento:'Medicamento',outro:'Outro'})[tipo]||tipo||'Registro';}
+function findPet(id){return ((DATA&&DATA.pets)||[]).find(p=>p.id===id);}
+window.openPetForm=id=>{
+  const p=id?findPet(id):null;
+  $('#petForm').reset();$('#petId').value=p&&p.id||'';$('#petFormTitle').textContent=p?'Editar pet':'Adicionar pet';
+  $('#petName').value=p&&p.nome||'';$('#petSpecies').value=p&&p.especie||'';$('#petBirthday').value=isoDay(p&&p.nascimento)||'';
+  $('#petBreed').value=p&&p.raca||'';$('#petSize').value=p&&p.porte||'';$('#petSex').value=p&&p.sexo||'';
+  $('#petWeight').value=p&&p.peso||'';$('#petNotes').value=p&&p.obs||'';$('#petBirthday').max=TODAY;
+  $('#petModal').classList.add('show');setTimeout(()=>$('#petName').focus(),120);
+};
+window.openHealthForm=(petId,healthId)=>{
+  const p=findPet(petId);if(!p)return;
+  const h=healthId?(p.saude||[]).find(x=>x.id===healthId):null;
+  $('#healthForm').reset();$('#healthId').value=h&&h.id||'';$('#healthPetId').value=petId;
+  $('#healthFormTitle').textContent=h?'Editar cuidado':'Adicionar cuidado';$('#healthPetName').textContent='Pet: '+(p.nome||'Pet');
+  $('#healthType').value=h&&h.tipo||'vacina';$('#healthDescription').value=h&&h.descricao||'';
+  $('#healthApplied').value=isoDay(h&&h.aplicada_em)||'';$('#healthNext').value=isoDay(h&&h.proxima_em)||'';
+  $('#healthNotes').value=h&&h.obs||'';$('#healthApplied').max=TODAY;
+  $('#healthModal').classList.add('show');setTimeout(()=>$('#healthDescription').focus(),120);
+};
+$('#petForm').onsubmit=async e=>{
+  e.preventDefault();const b=e.submitter;b.disabled=true;
+  const p={id:$('#petId').value||null,name:$('#petName').value.trim(),species:$('#petSpecies').value,birthday:$('#petBirthday').value||null,breed:$('#petBreed').value,size:$('#petSize').value,sex:$('#petSex').value,weight:$('#petWeight').value||null,notes:$('#petNotes').value.trim()};
+  const {error}=await sb.rpc('portal_upsert_pet',{p});b.disabled=false;
+  if(error){toast(error.message&&error.message.includes('Nome')?error.message:'Não foi possível salvar o pet.');return;}
+  closeModal('petModal');toast('Pet salvo ✅');await load();
+};
+$('#healthForm').onsubmit=async e=>{
+  e.preventDefault();const b=e.submitter;b.disabled=true;
+  const p={id:$('#healthId').value||null,pet_id:$('#healthPetId').value,type:$('#healthType').value,description:$('#healthDescription').value.trim(),applied_on:$('#healthApplied').value||null,next_on:$('#healthNext').value||null,notes:$('#healthNotes').value.trim()};
+  const {error}=await sb.rpc('portal_upsert_pet_health',{p});b.disabled=false;
+  if(error){toast('Não foi possível salvar o cuidado.');return;}
+  closeModal('healthModal');toast('Cuidado salvo ✅');await load();
+};
+['petModal','healthModal','pixModal','pwaInstallModal'].forEach(id=>$('#'+id).addEventListener('click',e=>{if(e.target.id===id){if(id==='pixModal')pixClose();else closeModal(id);}}));
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal('petModal');closeModal('healthModal');closePwaInstall();pixClose();}});
+$('#enter').onclick=async()=>{const email=$('#email').value.trim(),password=$('#password').value;if(!email||!password){$('#loginMsg').textContent='Preencha e-mail e senha.';return;}const b=$('#enter');b.disabled=true;$('#loginMsg').textContent='Entrando…';try{const {data,error}=await sb.auth.signInWithPassword({email,password});if(error||!data.session){$('#loginMsg').textContent='E-mail ou senha inválidos.';return;}await load();}catch(e){$('#loginMsg').textContent='Não foi possível entrar agora.';}finally{b.disabled=false;}};
+$('#password').onkeydown=e=>{if(e.key==='Enter')$('#enter').click();};
+$('#logout').onclick=async()=>{await sb.auth.signOut();location.reload();};
+$('#saveProfile').onclick=async()=>{const {error}=await sb.rpc('portal_update_profile',{p:{phone:$('#phone').value,email:$('#profileEmail').value,address:$('#address').value,bairro:$('#bairro').value}});if(error){toast('Não foi possível salvar.');return;}toast('Dados atualizados ✅');load();};
+// Endereço por CEP (grava o número dentro do endereço, como no admin)
+$('#cep').oninput=e=>{let v=e.target.value.replace(/\D/g,'').slice(0,8);e.target.value=v.length>5?v.slice(0,5)+'-'+v.slice(5):v;};
+async function buscaCepPortal(){
+  const cep=($('#cep').value||'').replace(/\D/g,'');
+  if(cep.length!==8){toast('CEP deve ter 8 dígitos.');return;}
+  const b=$('#btnCep');b.disabled=true;const old=b.textContent;b.textContent='…';
+  try{
+    const r=await fetch(`https://viacep.com.br/ws/${cep}/json/`);const d=await r.json();
+    if(d.erro){toast('CEP não encontrado.');return;}
+    const num=($('#num').value||'').trim();
+    const rua=[d.logradouro,num].filter(Boolean).join(', ');
+    $('#address').value=[rua,d.bairro,d.localidade&&d.uf?`${d.localidade}/${d.uf}`:''].filter(Boolean).join(' - ');
+    $('#bairro').value=d.bairro||$('#bairro').value;
+    toast('Endereço preenchido pelo CEP ✅');
+    if(!num)$('#num').focus();
+  }catch(e){toast('Falha ao consultar o CEP.');}
+  finally{b.disabled=false;b.textContent=old;}
+}
+$('#btnCep').onclick=buscaCepPortal;
+$('#num').onblur=()=>{if(($('#cep').value||'').replace(/\D/g,'').length===8&&$('#num').value.trim())buscaCepPortal();};
+$('#savePassword').onclick=async()=>{const password=$('#newPassword').value;if(password.length<10){toast('Use pelo menos 10 caracteres.');return;}const b=$('#savePassword');b.disabled=true;const {error}=await sb.auth.updateUser({password});b.disabled=false;if(error){toast('Não foi possível alterar a senha.');return;}$('#newPassword').value='';toast('Senha atualizada ✅');};
+// ===== Pagamento PIX (Mercado Pago) =====
+let PIXPOLL=null;
+function pixClose(){$('#pixModal').classList.remove('show');if(PIXPOLL){clearInterval(PIXPOLL);PIXPOLL=null;}}
+function pixPaidHtml(){return '<h3>✅ Pagamento confirmado!</h3><p class="muted" style="margin:8px 0 0">Sua conta foi quitada e a loja já foi avisada. Obrigado! 🎉</p><button class="btn block" style="margin-top:14px" onclick="pixClose()">Fechar</button>';}
+window.pixCopy=()=>{const e=$('#pixCode');if(!e)return;if(navigator.clipboard)navigator.clipboard.writeText(e.value).then(()=>toast('Código copiado ✓'));else{e.select();document.execCommand('copy');toast('Código copiado ✓');}};
+function pixRender(d){
+  const img=d.qr_code_base64?`<img class="qrimg" alt="QR Code PIX" src="data:image/png;base64,${d.qr_code_base64}">`:'<p class="muted" style="text-align:center;margin:14px 0">QR indisponível — use o código copia e cola abaixo.</p>';
+  $('#pixSheet').innerHTML=`<h3>💠 Pague ${BRL(d.amount)}</h3>
+    <p class="muted" style="margin:2px 0 0">Abra o app do seu banco, escaneie o QR ou cole o código PIX.</p>
+    ${img}
+    ${d.qr_code?`<textarea class="pixcode" id="pixCode" readonly>${esc(d.qr_code)}</textarea><button class="btn block" style="margin-top:8px" onclick="pixCopy()">📋 Copiar código PIX</button>`:''}
+    <p id="pixStatusLine" class="muted" style="text-align:center;margin-top:12px">⏳ Aguardando o pagamento cair…</p>
+    <button class="btn ghost block" style="margin-top:6px" onclick="pixClose()">Fechar</button>`;
+}
+window.payReceivable=async id=>{
+  const sheet=$('#pixSheet');$('#pixModal').classList.add('show');
+  sheet.innerHTML='<h3>💠 Pagamento PIX</h3><p class="muted" style="margin:10px 0">Gerando cobrança segura…</p>';
+  let res;try{res=await sb.functions.invoke('portal-pix',{body:{action:'create',receivable_id:id}});}catch(e){res={error:e};}
+  const data=res.data,error=res.error;
+  if(error||!data||!data.ok){
+    let msg=(data&&data.error)||(error&&error.message)||'Não foi possível gerar o PIX agora.';
+    try{if(error&&error.context){const j=await error.context.json();if(j&&j.error)msg=j.error;}}catch(_){}
+    sheet.innerHTML=`<h3>💠 Pagamento PIX</h3><p style="color:var(--red);margin:12px 0">${esc(msg)}</p><button class="btn ghost block" onclick="pixClose()">Fechar</button>`;return;
+  }
+  if(data.status==='paid'){sheet.innerHTML=pixPaidHtml();toast('Pagamento confirmado ✅');setTimeout(load,1200);return;}
+  pixRender(data);
+  PIXPOLL=setInterval(async()=>{
+    let r;try{r=await sb.functions.invoke('portal-pix',{body:{action:'status',charge_id:data.charge_id}});}catch(e){return;}
+    const st=r.data&&r.data.status;
+    if(st==='paid'){clearInterval(PIXPOLL);PIXPOLL=null;$('#pixSheet').innerHTML=pixPaidHtml();toast('Pagamento confirmado ✅');setTimeout(load,1400);}
+    else if(st&&['cancelled','expired','error'].includes(st)){clearInterval(PIXPOLL);PIXPOLL=null;const s=$('#pixStatusLine');if(s){s.textContent='A cobrança expirou ou foi cancelada. Feche e tente de novo.';s.style.color='var(--red)';}}
+  },4000);
+};
+window.setSub=async(id,status)=>{const {error}=await sb.rpc('portal_set_subscription_status',{p_subscription:id,p_status:status});if(error){toast('Não foi possível alterar.');return;}toast(status==='paused'?'Assinatura pausada.':'Assinatura retomada ✅');load();};
+(async()=>{const {data:{session}}=await sb.auth.getSession();if(session)await load();})();
+// bloqueia zoom por pinça/duplo-toque no iOS (que ignora user-scalable=no)
+['gesturestart','gesturechange','gestureend'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
+let lastTouch=0;document.addEventListener('touchend',e=>{const n=Date.now();if(n-lastTouch<=350)e.preventDefault();lastTouch=n;},{passive:false});
+if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+</script>
+</body>
+</html>

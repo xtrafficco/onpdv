@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#12307a">
+<!-- A aplicação autenticada é carregada somente depois da sessão ser confirmada. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  base-uri 'self';
+  object-src 'none';
+  script-src 'self' https://cdn.jsdelivr.net;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src 'self' https://fonts.gstatic.com;
+  img-src 'self' data: blob: https://api.qrserver.com https://qkhpvqepgozsaamxmugk.supabase.co https://*.tile.openstreetmap.org;
+  connect-src 'self' https://qkhpvqepgozsaamxmugk.supabase.co wss://qkhpvqepgozsaamxmugk.supabase.co https://viacep.com.br https://nominatim.openstreetmap.org;
+  frame-src 'self';
+  worker-src 'self';
+  manifest-src 'self';
+  form-action 'self';">
+<title>ONPDV — ERP &amp; Frente de Caixa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&amp;family=Nunito:wght@400;600;700;800&amp;display=swap" rel="stylesheet">
+<!-- supabase-js: versão EXATA + SRI (integrity). Se a CDN servir um arquivo adulterado,
+     o navegador recusa. Ao atualizar a versão, recalcule o hash sha384 do novo arquivo. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8"
+        integrity="sha384-Tve8O+C6PBzsIMK/IRCwHbi8fyEzXIlIs6OfVBZHubplwYhaQF/4Mzxqgg+pp/oy"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!-- PWA: instalável no PC e abre offline (a casca; dados dependem do Supabase). -->
+<link rel="manifest" href="app.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ONPDV Caixa">
+
+<!-- Leaflet (mapa de rastreio em tempo real) — local, para funcionar como PWA e ser cacheado. -->
+<link rel="stylesheet" href="lib/leaflet/leaflet.css">
+
+<!-- Gerador de QR local (qrcode-generator, MIT) — para "Meu código no caixa"; local p/ funcionar como PWA e ser cacheado. -->
+
+<link rel="stylesheet" href="assets/css/onpdv.css">
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div id="login">
+  <div class="box">
+    <div class="brand"><span class="on">ON</span>PDV</div>
+    <p class="muted login-subtitle">ERP &amp; Frente de Caixa</p>
+    <div class="field"><label class="lbl" for="liEmail">E-mail</label><input id="liEmail" class="in" type="email" autocomplete="username" placeholder="voce@empresa.com"></div>
+    <div class="field"><label class="lbl" for="liPass">Senha</label><div class="password-field"><input id="liPass" class="in" type="password" autocomplete="current-password" placeholder="••••••••"><button id="btnTogglePassword" class="password-toggle" type="button" aria-label="Mostrar senha" aria-pressed="false">Mostrar</button></div></div>
+    <button id="btnLogin" class="btn login-submit">Entrar</button>
+    <p class="muted login-help">Contas são criadas somente pelo administrador.</p>
+    <div class="login-links"><button id="btnResetPassword" class="link-button" type="button">Esqueci minha senha</button><a href="cliente.html">Portal do Cliente</a></div>
+    <p id="liMsg" class="muted login-message" role="status" aria-live="polite"></p>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<main id="appHost" aria-live="polite"></main>
+
+<script src="assets/js/onpdv-bootstrap.js" defer></script>
+</body>
+</html>

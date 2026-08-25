@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#12307a">
+<!-- Content-Security-Policy (mesma política do index.html, adaptada ao app do entregador). -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  base-uri 'self';
+  object-src 'none';
+  script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src 'self' https://fonts.gstatic.com;
+  img-src 'self' data: blob: https://qkhpvqepgozsaamxmugk.supabase.co;
+  media-src 'self' blob:;
+  connect-src 'self' https://qkhpvqepgozsaamxmugk.supabase.co wss://qkhpvqepgozsaamxmugk.supabase.co;
+  frame-src 'none';
+  worker-src 'self';
+  manifest-src 'self';
+  form-action 'self';">
+<title>ONPDV Entregas — App do entregador</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ONPDV Entregas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&amp;family=Nunito:wght@400;600;700;800;900&amp;display=swap" rel="stylesheet">
+<!-- supabase-js: versão EXATA + SRI (integrity), igual ao index.html -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8"
+        integrity="sha384-Tve8O+C6PBzsIMK/IRCwHbi8fyEzXIlIs6OfVBZHubplwYhaQF/4Mzxqgg+pp/oy"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<style>
+:root{
+  --dark:#12307a; --dark2:#0e2660; --bg:#f7f8fa; --card:#fff;
+  --ink:#1c2333; --ink2:#7a869f; --line:#e4e7ee;
+  --accent:#ffcf3f; --accent-d:#e9b400; --green:#1f9d55; --green-soft:#e3f6ec;
+  --red:#d94b45; --amber:#e2a400; --focus:#5e6ad2; --r:12px; --shadow:0 1px 2px rgba(16,24,40,.04),0 4px 16px rgba(16,24,40,.06);
+  --safe-t:env(safe-area-inset-top); --safe-b:env(safe-area-inset-bottom);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:'Nunito',sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+h1,h2,h3,h4{font-family:'Fredoka',sans-serif;font-weight:600;letter-spacing:-.2px}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input{font-family:inherit;font-size:16px}
+.hide{display:none!important}
+.muted{color:var(--ink2)}
+
+/* ---------- botões / chips ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--dark);color:#fff;border-radius:11px;padding:12px 16px;font-weight:800;font-size:15px;transition:filter .15s,transform .05s}
+.btn:hover{filter:brightness(1.08)}.btn:active{transform:translateY(1px)}
+.btn.acc{background:var(--accent);color:var(--dark2)}
+.btn.green{background:var(--green)}
+.btn.ghost{background:#f4f7ff;border:1.5px solid var(--line);color:var(--ink)}
+.btn.sm{padding:8px 12px;font-size:13px;border-radius:9px}
+.btn.block{width:100%}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:900;background:var(--dark);color:#fff}
+.chip.ok{background:var(--green-soft);color:var(--green)}
+.chip.amber{background:#fff2cc;color:#8a6b00}
+.chip.warn{background:#fdeceb;color:var(--red)}
+
+/* ---------- login ---------- */
+#login{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(160deg,#12307a,#0a1c4d);padding:20px;z-index:50}
+#login .box{background:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.35);width:min(400px,100%);padding:26px}
+.brand{font-family:'Fredoka';font-weight:700;font-size:26px;color:var(--dark);display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:4px}
+.brand .on{background:var(--accent);color:var(--dark2);border-radius:8px;padding:1px 8px}
+.sub{text-align:center;color:var(--ink2);font-size:13px;margin-bottom:18px}
+.lbl{display:block;font-size:12px;font-weight:800;color:var(--ink2);margin:0 0 5px 2px;text-transform:uppercase;letter-spacing:.3px}
+.in{width:100%;background:#fff;border:1.5px solid var(--line);border-radius:10px;padding:12px 13px;color:var(--ink);outline:none;transition:border .15s;margin-bottom:12px}
+.in:focus{border-color:var(--focus);box-shadow:0 0 0 3px rgba(94,106,210,.15)}
+#liMsg{min-height:18px;font-size:13px;color:var(--red);text-align:center;margin-top:6px}
+
+/* ---------- topo ---------- */
+.top{background:var(--dark);color:#fff;position:sticky;top:0;z-index:20;padding:calc(12px + var(--safe-t)) 16px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;box-shadow:0 2px 12px rgba(0,0,0,.2)}
+.top .brand-sm{font-family:'Fredoka';font-weight:700;font-size:19px;display:flex;align-items:center;gap:7px}
+.top .loja{font-size:12px;opacity:.85}
+.body{max-width:760px;margin:0 auto;padding:14px 16px calc(28px + var(--safe-b))}
+.hello{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0 12px}
+.hello h2{font-size:22px}
+.refresh{background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 13px;font-weight:800;color:var(--ink)}
+
+.scanbtn{width:100%;background:var(--accent);color:var(--dark2);border-radius:16px;padding:20px;font-size:18px;font-weight:900;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;gap:10px}
+.scanbtn:active{transform:translateY(1px)}
+.search{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:4px 12px;margin-top:12px}
+.search input{flex:1;border:none;outline:none;background:transparent;font-size:15px;padding:11px 0;color:var(--ink)}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:9px;margin:16px 0 4px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:11px 13px}
+.stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink2);font-weight:800}
+.stat .v{font-family:'Fredoka';font-size:21px;font-weight:600;color:var(--dark)}
+
+.sec{font-family:'Fredoka';font-size:18px;margin:20px 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.empty{color:var(--ink2);padding:2px 0 6px}
+
+/* ---------- cartões (cores corrigidas: texto escuro em fundo claro) ---------- */
+.card{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:16px;padding:14px 15px;margin-bottom:11px;box-shadow:0 2px 10px rgba(18,48,122,.06)}
+.card.rota{border-color:var(--accent-d);border-left:5px solid var(--accent-d)}
+.card.done{opacity:.8}
+.card .nm{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:900;font-size:15.5px;color:var(--ink)}
+.card .adr{margin:7px 0;font-size:15px;color:var(--ink)}
+.card .mt{color:var(--ink2);font-size:13px}
+.card .mt b{color:var(--dark)}
+.acts{margin-top:11px;display:flex;gap:8px;flex-wrap:wrap}
+.acts .btn{text-decoration:none}
+
+.exit{width:100%;margin:24px 0 8px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px;font-weight:800;color:var(--ink)}
+
+/* ---------- install banner ---------- */
+#install{position:sticky;bottom:0;z-index:15;margin:14px 16px calc(10px + var(--safe-b));max-width:760px;background:var(--dark);color:#fff;border-radius:14px;padding:13px 15px;display:flex;align-items:center;gap:12px;box-shadow:0 10px 30px rgba(0,0,0,.28)}
+#install .txt{flex:1;font-size:13.5px;font-weight:700;line-height:1.3}
+#install .txt small{display:block;font-weight:600;opacity:.8;font-size:11.5px}
+#install button{white-space:nowrap}
+
+/* ---------- scanner ---------- */
+#scan{position:fixed;inset:0;background:#000;z-index:60;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:calc(16px + var(--safe-t)) 16px calc(16px + var(--safe-b))}
+#scan.on{display:flex}
+#scanVideo{width:100%;max-width:520px;border-radius:16px;background:#111;aspect-ratio:3/4;object-fit:cover}
+#scanMsg{color:#fff;text-align:center;font-weight:700}
+
+/* ---------- modal ---------- */
+.ov{position:fixed;inset:0;background:rgba(9,18,45,.55);display:grid;place-items:end center;z-index:70;padding:0}
+.modal{background:#fff;width:100%;max-width:560px;border-radius:20px 20px 0 0;max-height:92vh;overflow:auto;overscroll-behavior:contain;padding-bottom:calc(12px + var(--safe-b))}
+.m-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:16px 18px 8px;position:sticky;top:0;background:#fff}
+.m-head h3{font-size:19px}
+.m-head button{font-size:16px;font-weight:900;color:var(--ink2);width:34px;height:34px;border-radius:50%;background:#f1f4fb}
+.m-body{padding:6px 18px 16px}
+.m-body p{margin:3px 0}
+.tbl{width:100%;border-collapse:collapse;margin-top:8px}
+.tbl th,.tbl td{padding:6px 4px;text-align:left;border-bottom:1px solid var(--line);font-size:14px}
+.tbl .r{text-align:right}
+.sum{background:#f4f7ff;border-radius:12px;padding:10px 12px;margin-top:10px}
+.sum .l{display:flex;justify-content:space-between;padding:3px 0}
+.sum .l.big{font-family:'Fredoka';font-size:19px;font-weight:600;border-top:1px solid var(--line);margin-top:5px;padding-top:8px}
+.m-foot{display:flex;gap:8px;padding:6px 18px 14px;flex-wrap:wrap}
+.m-foot .btn{flex:1;min-width:130px}
+
+/* ---------- toast ---------- */
+.toast{position:fixed;left:50%;bottom:calc(22px + var(--safe-b));transform:translateX(-50%) translateY(20px);background:#0e2660;color:#fff;padding:12px 18px;border-radius:12px;font-weight:800;font-size:14px;opacity:0;pointer-events:none;transition:.25s;z-index:90;max-width:90vw;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.err{background:var(--red)}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="box">
+    <div class="brand">🛵 <span><span class="on">ON</span>PDV</span></div>
+    <p class="sub">App do entregador</p>
+    <label class="lbl" for="liEmail">E-mail</label>
+    <input id="liEmail" class="in" type="email" autocomplete="username" inputmode="email" placeholder="voce@email.com">
+    <label class="lbl" for="liPass">Senha</label>
+    <input id="liPass" class="in" type="password" autocomplete="current-password" placeholder="sua senha">
+    <button class="btn block" id="btnLogin">Entrar</button>
+    <p id="liMsg"></p>
+  </div>
+</div>
+
+<div id="app" class="hide">
+  <div class="top">
+    <div class="brand-sm">🛵 ONPDV Entregas</div>
+    <span class="loja" id="loja"></span>
+  </div>
+  <div class="body">
+    <div class="hello">
+      <h2>Olá, <span id="name">—</span>!</h2>
+      <button class="refresh" id="btnRefresh">↻ Atualizar</button>
+    </div>
+    <div id="geoStatus" style="margin:0 0 10px;font-size:12.5px;font-weight:800;padding:7px 12px;border-radius:999px;display:inline-flex;align-items:center;gap:6px;background:#eef2fb;color:#12307a">📍 localização desligada</div>
+    <button class="scanbtn" id="btnScan">📷 Escanear etiqueta do pedido</button>
+    <div class="search">
+      <span class="muted">🔎</span>
+      <input id="q" placeholder="…ou buscar pelo número do pedido" inputmode="numeric" autocomplete="off">
+      <button class="btn ghost sm" id="btnFind">Buscar</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div id="list"></div>
+    <button class="exit" id="btnLogout">Sair da conta</button>
+  </div>
+  <div id="install" class="hide">
+    <div class="txt">📲 Instale o app na tela inicial<small id="installHint">Toque para instalar e abrir como um app.</small></div>
+    <button class="btn acc sm" id="btnInstall">Instalar</button>
+    <button class="btn ghost sm" id="btnInstallClose">✕</button>
+  </div>
+</div>
+
+<div id="scan">
+  <video id="scanVideo" autoplay playsinline muted></video>
+  <p id="scanMsg">Aponte a câmera para o QR da guia…</p>
+  <button class="btn ghost" onclick="stopScan()">Cancelar</button>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toast" class="toast"></div>
+
+<script>
+// ======================= CONFIG =======================
+const SUPABASE_URL='https://qkhpvqepgozsaamxmugk.supabase.co';
+const SUPABASE_KEY='sb_publishable_rh5Whcvb9PFt9MI1iL6dlg_qS9BGRNw';
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+// ======================= HELPERS =======================
+const $=s=>document.querySelector(s);
+const BRL=n=>(Number(n)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(msg,err){const t=$('#toast');t.textContent=msg;t.className='toast show'+(err?' err':'');clearTimeout(toast._t);toast._t=setTimeout(()=>t.className='toast',2800);}
+function modal(html){$('#modalRoot').innerHTML=`<div class="ov" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`;}
+function closeModal(){$('#modalRoot').innerHTML='';}
+window.closeModal=closeModal;
+function dur(m){m=+m||0;if(m<60)return m+' min';const h=Math.floor(m/60),r=m%60;return h+'h'+(r?(' '+r+'m'):'');}
+function fmtDT(t){if(!t)return '—';const d=new Date(t);if(isNaN(d))return '—';const p=n=>String(n).padStart(2,'0');return p(d.getDate())+'/'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());}
+let ME=null, STORES=[], DATA={fila:[],rota:[],entregues:[],resumo:{}}, TIMER=null;
+
+// só pedidos do dia (fila/rota/entregues de hoje)
+function keepToday(d){
+  d=d||{}; const t0=new Date(); t0.setHours(0,0,0,0);
+  const isToday=ts=>{if(!ts)return false;const x=new Date(ts);return !isNaN(x)&&x.getTime()>=t0.getTime();};
+  const fila=(d.fila||[]).filter(x=>isToday(x.created_at));
+  const rota=(d.rota||[]).filter(x=>isToday(x.dispatched_at||x.created_at));
+  const entregues=(d.entregues||[]).filter(x=>isToday(x.delivered_at||x.created_at));
+  const tm=entregues.map(x=>+x.minutos_entrega).filter(v=>v||v===0);
+  return {fila,rota,entregues,resumo:{
+    fila:fila.length,rota:rota.length,entregues:entregues.length,
+    valor_entregue:entregues.reduce((a,x)=>a+(+x.total||0),0),
+    a_receber_rota:rota.filter(x=>!x.pago).reduce((a,x)=>a+(+x.total||0),0),
+    tempo_medio:tm.length?Math.round(tm.reduce((a,b)=>a+b,0)/tm.length):null }};
+}
+
+// ======================= AUTH =======================
+async function initAuth(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(session) onLogin(session); else $('#login').classList.remove('hide');
+}
+$('#btnLogin').onclick=async()=>{
+  const email=$('#liEmail').value.trim(), password=$('#liPass').value;
+  if(!email||!password){$('#liMsg').textContent='Preencha e-mail e senha.';return;}
+  const btn=$('#btnLogin');
+  btn.disabled=true; $('#liMsg').textContent='Entrando…';
+  try{
+    const {data,error}=await sb.auth.signInWithPassword({email,password});
+    if(error||!data.session){$('#liMsg').textContent='E-mail ou senha inválidos.';return;}
+    await onLogin(data.session);
+  }catch(e){
+    console.error('login',e);
+    $('#liMsg').textContent='Não foi possível entrar agora. Verifique sua conexão.';
+  }finally{
+    btn.disabled=false;
+  }
+};
+$('#liPass').onkeydown=e=>{if(e.key==='Enter')$('#btnLogin').click();};
+$('#btnLogout').onclick=async()=>{await sb.auth.signOut();location.reload();};
+
+async function onLogin(session){
+  const {data:me,error}=await sb.from('app_users').select('*').eq('id',session.user.id).maybeSingle();
+  if(error||!me||me.ativo===false||!me.store_id||!['motoboy','admin'].includes(me.papel)){
+    await sb.auth.signOut();
+    $('#liMsg').textContent='Conta sem acesso de entregador. Fale com o administrador.';
+    return;
+  }
+  ME=me;
+  $('#login').classList.add('hide'); $('#app').classList.remove('hide');
+  $('#name').textContent=((ME.nome||'entregador').split(' ')[0]).toUpperCase();
+  try{const {data:st}=await sb.from('stores').select('id,nome'); STORES=st||[];}catch(e){}
+  const loja=STORES.find(x=>x.id===ME.store_id); $('#loja').textContent=loja?loja.nome:'';
+  loadList();
+  clearInterval(TIMER);
+  TIMER=setInterval(()=>{if(!$('#app').classList.contains('hide'))loadList(true);},20000);
+  startGeoTracking();
+}
+
+// ======================= GPS / RASTREIO =======================
+// Envia a posição do entregador para o painel (erp_courier_ping). Requer https:// (ou localhost)
+// e permissão de localização. Throttle: no máx a cada 15s, ou quando mover mais de ~30 m.
+let GEO = { watchId:null, pulseId:null, last:0, lastLat:null, lastLng:null };
+function geoSet(txt,on){ const el=$('#geoStatus'); if(!el) return;
+  el.textContent=txt;
+  el.style.background = on===true?'#e3f6ec':(on===false?'#fdecec':'#eef2fb');
+  el.style.color      = on===true?'#0a7a3d':(on===false?'#a13b3b':'#12307a'); }
+function geoDist(la1,lo1,la2,lo2){ const R=6371000, t=Math.PI/180;
+  const dLa=(la2-la1)*t, dLo=(lo2-lo1)*t;
+  const a=Math.sin(dLa/2)**2 + Math.cos(la1*t)*Math.cos(la2*t)*Math.sin(dLo/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a)); }
+function startGeoTracking(){
+  if(!('geolocation' in navigator)){ geoSet('📍 sem GPS neste aparelho', false); return; }
+  if(!window.isSecureContext){ geoSet('📍 abra pelo endereço https:// para rastrear', false); return; }
+  if(GEO.watchId==null){
+    geoSet('📍 ativando localização…', null);
+    GEO.watchId = navigator.geolocation.watchPosition(onGeo, onGeoErr, { enableHighAccuracy:true, maximumAge:5000, timeout:20000 });
+  }
+  if(GEO.pulseId==null) GEO.pulseId=setInterval(geoPulse,30000);
+  geoPulse();
+}
+async function onGeo(pos){
+  const c=pos.coords, now=Date.now();
+  const moved = (GEO.lastLat==null) || geoDist(GEO.lastLat,GEO.lastLng,c.latitude,c.longitude) > 20;
+  if(now-GEO.last < 15000 && !moved){ geoSet('📍 compartilhando localização', true); return; }
+  try{
+    const {error}=await sb.rpc('erp_courier_ping',{ p_lat:c.latitude, p_lng:c.longitude,
+      p_acc:c.accuracy!=null?Math.round(c.accuracy):null,
+      p_speed:(c.speed!=null && c.speed>=0)?c.speed:null,
+      p_heading:(c.heading!=null && !isNaN(c.heading))?c.heading:null });
+    if(error) throw error;
+    GEO.last=now; GEO.lastLat=c.latitude; GEO.lastLng=c.longitude;
+    geoSet('📍 compartilhando localização · GPS ativo', true);
+  }catch(e){ geoSet('📍 falha ao enviar posição (tentando…)', false); }
+}
+function onGeoErr(err){
+  geoSet(err && err.code===1 ? '📍 permissão de localização negada' : '📍 localização indisponível', false);
+}
+function geoPulse(){
+  if(document.visibilityState==='visible'&&!$('#app').classList.contains('hide'))
+    navigator.geolocation.getCurrentPosition(onGeo,onGeoErr,{enableHighAccuracy:true,maximumAge:5000,timeout:20000});
+}
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&GEO.watchId!=null) geoPulse(); });
+
+// ======================= LISTA =======================
+$('#btnRefresh').onclick=()=>{loadList();toast('Lista atualizada');};
+function card(r,tipo){
+  const wa=(r.fone||'').replace(/\D/g,'');
+  const pago=r.pago?'<span class="chip ok">pago</span>':`<span class="chip amber">cobrar ${BRL(r.total)}</span>`;
+  const chip=tipo==='fila'?'<span class="chip">na fila</span>'
+    :tipo==='rota'?`<span class="chip amber">em rota${r.eta_minutes!=null?' · previsão '+dur(r.eta_minutes):(r.minutos_em_rota!=null?' · há '+dur(r.minutos_em_rota):'')}</span>`
+    :`<span class="chip ok">entregue${r.minutos_entrega!=null?' · '+dur(r.minutos_entrega):''}</span>`;
+  return `<div class="card ${tipo==='rota'?'rota':tipo==='entregues'?'done':''}">
+    <div class="nm"><span>#${r.venda_numero||''} · ${esc(r.cliente||'Cliente')}</span>${chip}</div>
+    <div class="adr">${esc(r.endereco||'—')}</div>
+    <div class="mt">${esc(r.fone||'sem telefone')} · ${r.itens||0} item(ns) · <b>${BRL(r.total)}</b>${+r.frete>0?' (frete '+BRL(r.frete)+')':''}${tipo!=='entregues'?' · '+pago:''}${r.recebida_de_outra?' · pedido de '+esc(r.origem_nome||''):''}${tipo==='rota'&&r.eta_distance_km!=null?' · '+Number(r.eta_distance_km).toLocaleString('pt-BR',{maximumFractionDigits:1})+' km restantes':''}</div>
+    <div class="acts">
+      <button class="btn ghost sm" onclick="detail('${r.id}')">Ver pedido</button>
+      ${wa?`<a class="btn ghost sm" href="https://wa.me/55${wa.replace(/^55/,'')}" target="_blank">💬 WhatsApp</a>`:''}
+      ${r.endereco?`<a class="btn ghost sm" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.endereco)}" target="_blank">📍 Mapa</a>`:''}
+      ${tipo==='fila'?`<button class="btn" onclick="handleScan('${r.id}')">🛵 Marcar saída</button>`:''}
+      ${tipo==='rota'?`<button class="btn green" onclick="handleScan('${r.id}')">✅ Marcar entregue</button>`:''}
+    </div></div>`;
+}
+async function loadList(silent){
+  const {data,error}=await sb.rpc('erp_courier_queue',{p_dias:1});
+  if(error){if(!silent)toast('Erro: '+error.message,true);return;}
+  DATA=keepToday(data||{});
+  const r=DATA.resumo;
+  $('#stats').innerHTML=`
+    <div class="stat"><div class="k">Prontos p/ sair</div><div class="v">${r.fila||0}</div></div>
+    <div class="stat"><div class="k">Em rota</div><div class="v">${r.rota||0}</div></div>
+    <div class="stat"><div class="k">Entregues hoje</div><div class="v">${r.entregues||0}</div></div>
+    <div class="stat"><div class="k">⏱️ Tempo médio</div><div class="v">${r.tempo_medio!=null?dur(r.tempo_medio):'—'}</div></div>`;
+  $('#list').innerHTML=`
+    <div class="sec">📦 Prontos para sair (${DATA.fila.length})</div>
+    ${DATA.fila.length?DATA.fila.map(x=>card(x,'fila')).join(''):'<p class="empty">Nenhum pedido pronto para sair.</p>'}
+    <div class="sec">🛵 Em rota (${DATA.rota.length})${+r.a_receber_rota>0?` <span class="chip amber">a receber ${BRL(r.a_receber_rota)}</span>`:''}</div>
+    ${DATA.rota.length?DATA.rota.map(x=>card(x,'rota')).join(''):'<p class="empty">Nenhum pedido em rota.</p>'}
+    <div class="sec">✅ Entregues hoje (${DATA.entregues.length})${+r.valor_entregue>0?` <span class="chip ok">${BRL(r.valor_entregue)}</span>`:''}</div>
+    ${DATA.entregues.length?DATA.entregues.map(x=>card(x,'entregues')).join(''):'<p class="empty">Nenhuma entrega concluída hoje ainda.</p>'}`;
+}
+
+window.detail=async id=>{
+  const {data:d,error}=await sb.rpc('erp_courier_find',{p_q:id});
+  if(error||!d){toast('Pedido não encontrado.',true);return;}
+  const itens=(d.itens||[]).map(i=>`<tr><td>${esc(i.descricao)}</td><td class="r">${(+i.qtd).toLocaleString('pt-BR')}</td><td class="r">${BRL(i.preco_unit)}</td><td class="r"><b>${BRL(i.subtotal)}</b></td></tr>`).join('');
+  const chip={fila:'<span class="chip">na fila</span>',em_rota:'<span class="chip amber">em rota</span>',entregue:'<span class="chip ok">entregue</span>',cancelada:'<span class="chip warn">cancelada</span>'}[d.status]||esc(d.status);
+  modal(`<div class="m-head"><h3>Pedido #${d.venda_numero||''} ${chip}</h3><button onclick="closeModal()">✕</button></div>
+    <div class="m-body">
+      <p style="font-family:Fredoka;font-size:19px"><b>${esc(d.cliente||'—')}</b></p>
+      <p class="muted">${esc(d.fone||'')}</p>
+      <p>${esc(d.endereco||'—')}</p>
+      ${d.obs?`<p class="muted">Obs: ${esc(d.obs)}</p>`:''}
+      <table class="tbl"><thead><tr><th>Item</th><th class="r">Qtd</th><th class="r">Unit.</th><th class="r">Total</th></tr></thead>
+        <tbody>${itens||'<tr><td colspan="4" class="muted">Sem itens.</td></tr>'}</tbody></table>
+      <div class="sum">
+        <div class="l"><span>Itens</span><b>${BRL(d.subtotal)}</b></div>
+        <div class="l"><span>Frete</span><b>${BRL(d.frete)}</b></div>
+        <div class="l big"><span>${d.pago?'Total (já pago)':'A RECEBER'}</span><b>${BRL(d.total)}</b></div>
+      </div>
+      <p class="muted" style="margin-top:8px">${d.pago?'✅ Já pago na loja — não cobrar.':'💵 Cobrar na entrega.'}${d.dispatched_at?`<br>Saiu em ${fmtDT(d.dispatched_at)}`:''}${d.delivered_at?` · entregue em ${fmtDT(d.delivered_at)}`:''}</p>
+    </div>
+    <div class="m-foot">
+      ${d.status==='fila'?`<button class="btn" onclick="closeModal();handleScan('${d.id}')">🛵 Marcar saída</button>`:''}
+      ${d.status==='em_rota'?`<button class="btn green" onclick="closeModal();proofSheet('${d.id}',${JSON.stringify(d.cliente||'').replace(/"/g,'&quot;')})">✅ Comprovar entrega</button>`:''}
+      <button class="btn ghost" onclick="closeModal()">Fechar</button></div>`);
+};
+
+$('#btnFind').onclick=find;
+$('#q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();find();}};
+async function find(){
+  const q=($('#q').value||'').trim();
+  if(!q){toast('Digite o número do pedido.',true);return;}
+  const {data:d}=await sb.rpc('erp_courier_find',{p_q:q});
+  if(!d){toast('Pedido #'+q+' não encontrado.',true);return;}
+  $('#q').value=''; detail(d.id);
+}
+
+// ======================= SCAN / MARCAR =======================
+const SCAN_COOLDOWN=30; let SCAN_BUSY=false;
+window.handleScan=async raw=>{
+  let code=String(raw||'').trim(); if(!code||SCAN_BUSY)return; SCAN_BUSY=true;
+  try{
+    code=code.replace(/^.*[:/]/,'');
+    if(!/^[0-9a-f-]{32,36}$/i.test(code)){
+      const {data:f}=await sb.rpc('erp_courier_find',{p_q:code});
+      if(!f){toast('Pedido não encontrado.',true);return;}
+      code=f.id;
+    }
+    const {data,error}=await sb.rpc('erp_delivery_scan',{p_id:code,p_cooldown:SCAN_COOLDOWN});
+    if(error){
+      const m=error.message||'';
+      if(m.includes('AGUARDE:'))toast('Aguarde '+m.split('AGUARDE:')[1]+'s antes de confirmar a entrega.',true);
+      else toast('Erro: '+m,true);
+      return;
+    }
+    if(data.status==='em_rota'){toast('Saiu para entrega 🛵');if(data.notify)notifyWhats(data.fone,data.mensagem);}
+    else if(data.status==='entregue'){toast('Entrega concluída ✅'+(data.minutos!=null?' · '+dur(data.minutos):''));}
+    loadList();
+  }finally{setTimeout(()=>{SCAN_BUSY=false;},1500);}
+};
+// ======================= COMPROVANTE DE ENTREGA =======================
+function initSigPad(canvas){
+  const ctx=canvas.getContext('2d'); ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.strokeStyle='#111';
+  let drawing=false,last=null,dirty=false;
+  const pos=e=>{const r=canvas.getBoundingClientRect();const t=e.touches?e.touches[0]:e;return {x:(t.clientX-r.left)*(canvas.width/r.width),y:(t.clientY-r.top)*(canvas.height/r.height)};};
+  const start=e=>{e.preventDefault();drawing=true;last=pos(e);};
+  const move=e=>{if(!drawing)return;e.preventDefault();const p=pos(e);ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.stroke();last=p;dirty=true;};
+  const end=()=>{drawing=false;};
+  canvas.addEventListener('mousedown',start); canvas.addEventListener('mousemove',move); window.addEventListener('mouseup',end);
+  canvas.addEventListener('touchstart',start,{passive:false}); canvas.addEventListener('touchmove',move,{passive:false}); canvas.addEventListener('touchend',end);
+  return { clear:()=>{ctx.clearRect(0,0,canvas.width,canvas.height);dirty=false;}, isDirty:()=>dirty };
+}
+function compressPhoto(file, cb){
+  const fr=new FileReader();
+  fr.onload=()=>{ const img=new Image(); img.onload=()=>{
+    const max=800; let w=img.width,h=img.height;
+    if(w>h&&w>max){h=Math.round(h*max/w);w=max;} else if(h>=w&&h>max){w=Math.round(w*max/h);h=max;}
+    const c=document.createElement('canvas'); c.width=w; c.height=h;
+    c.getContext('2d').drawImage(img,0,0,w,h);
+    try{ cb(c.toDataURL('image/jpeg',0.5)); }catch(_e){ cb(null); }
+  }; img.onerror=()=>cb(null); img.src=fr.result; };
+  fr.onerror=()=>cb(null); fr.readAsDataURL(file);
+}
+window.proofSheet=(id,cliente)=>{
+  modal(`<div class="m-head"><h3>Comprovar entrega</h3><button onclick="closeModal()">✕</button></div>
+    <div class="m-body">
+      <p class="muted">Cliente: <b>${esc(cliente||'')}</b></p>
+      <div class="lbl" style="margin-top:6px">Quem recebeu</div>
+      <input id="pfRecv" class="in" placeholder="Nome de quem recebeu">
+      <div class="lbl" style="margin-top:10px">Assinatura (assine na tela)</div>
+      <canvas id="pfSig" width="600" height="200" style="width:100%;height:160px;border:1px dashed #bbb;border-radius:10px;background:#fff;touch-action:none"></canvas>
+      <button class="btn ghost" type="button" style="margin-top:6px" onclick="PF.sig.clear()">Limpar assinatura</button>
+      <div class="lbl" style="margin-top:10px">Foto do comprovante (opcional)</div>
+      <input id="pfPhoto" type="file" accept="image/*" capture="environment" class="in">
+      <div id="pfPrev"></div>
+    </div>
+    <div class="m-foot"><button class="btn green" id="pfGo" onclick="proofConfirm('${id}')">✅ Confirmar entrega</button>
+      <button class="btn ghost" onclick="closeModal()">Cancelar</button></div>`);
+  window.PF={ sig:initSigPad(document.getElementById('pfSig')), photo:null };
+  const pin=document.getElementById('pfPhoto');
+  if(pin) pin.onchange=()=>{ const f=pin.files&&pin.files[0]; if(!f)return; compressPhoto(f,du=>{ PF.photo=du; const pv=document.getElementById('pfPrev'); if(pv&&du)pv.innerHTML='<img src="'+du+'" style="max-width:100%;margin-top:8px;border-radius:8px">'; }); };
+};
+window.proofConfirm=async id=>{
+  const b=document.getElementById('pfGo'); if(b){b.disabled=true;b.textContent='Enviando…';}
+  const recv=((document.getElementById('pfRecv')||{}).value||'').trim();
+  const sig=(window.PF&&PF.sig&&PF.sig.isDirty())?document.getElementById('pfSig').toDataURL('image/png'):null;
+  try{
+    const {data,error}=await sb.rpc('erp_delivery_proof',{p_id:id,p_signature:sig,p_photo:(window.PF&&PF.photo)||null,p_receiver:recv||null});
+    if(error)throw error;
+    closeModal(); toast('Entrega comprovada ✅');
+    if(data&&data.notify)notifyWhats(data.fone,data.mensagem);
+    loadList();
+  }catch(e){ toast('Erro: '+(e.message||e),true); if(b){b.disabled=false;b.textContent='✅ Confirmar entrega';} }
+};
+async function notifyWhats(fone,mensagem){
+  const link='https://wa.me/55'+(fone||'').replace(/\D/g,'').replace(/^55/,'')+'?text='+encodeURIComponent(mensagem||'');
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    const r=await fetch(`${SUPABASE_URL}/functions/v1/wa-send`,{method:'POST',
+      headers:{'Authorization':`Bearer ${session.access_token}`,'Content-Type':'application/json'},
+      body:JSON.stringify({to:fone,message:mensagem})});
+    const j=await r.json();
+    if(j.sent)toast('Cliente avisado no WhatsApp ✅');
+    else if(j.fallback)window.open(j.fallback,'_blank');
+    else window.open(link,'_blank');
+  }catch(e){window.open(link,'_blank');}
+}
+
+// ---- scanner de câmera (usa BarcodeDetector quando disponível) ----
+let scanStream=null, scanRAF=null, detector=null;
+$('#btnScan').onclick=startScan;
+async function startScan(){
+  const sc=$('#scan'); sc.classList.add('on'); $('#scanMsg').textContent='Aponte a câmera para o QR…';
+  if(!('BarcodeDetector' in window)){
+    $('#scanMsg').innerHTML='Este aparelho não tem leitor de QR nativo.<br>Use a busca pelo número do pedido.';
+    setTimeout(stopScan,2600); openManual(); return;
+  }
+  try{
+    detector=detector||new window.BarcodeDetector({formats:['qr_code','code_128','ean_13']});
+    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const v=$('#scanVideo'); v.srcObject=scanStream; await v.play();
+    const tick=async()=>{
+      if(!$('#scan').classList.contains('on'))return;
+      try{const codes=await detector.detect(v);
+        if(codes&&codes.length){const val=codes[0].rawValue; stopScan(); handleScan(val); return;}
+      }catch(e){}
+      scanRAF=requestAnimationFrame(tick);
+    };
+    scanRAF=requestAnimationFrame(tick);
+  }catch(e){$('#scanMsg').textContent='Não consegui abrir a câmera. '+(e.message||'');setTimeout(stopScan,2600);openManual();}
+}
+window.stopScan=function(){
+  const sc=$('#scan'); sc.classList.remove('on');
+  if(scanRAF)cancelAnimationFrame(scanRAF); scanRAF=null;
+  if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}
+};
+function openManual(){$('#q').focus();}
+
+// ======================= PWA: instalação + service worker =======================
+let deferredPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault(); deferredPrompt=e;
+  const b=$('#install'); if(b&&!localStorage.getItem('onpdv_install_dismiss'))b.classList.remove('hide');
+});
+$('#btnInstall').onclick=async()=>{
+  if(!deferredPrompt)return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice; deferredPrompt=null;
+  $('#install').classList.add('hide');
+};
+$('#btnInstallClose').onclick=()=>{$('#install').classList.add('hide');localStorage.setItem('onpdv_install_dismiss','1');};
+window.addEventListener('appinstalled',()=>{$('#install').classList.add('hide');toast('App instalado 🎉');});
+// dica para iOS (não dispara beforeinstallprompt)
+(function(){
+  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  const standalone=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone;
+  if(isIOS&&!standalone&&!localStorage.getItem('onpdv_install_dismiss')){
+    const b=$('#install'); if(b){b.classList.remove('hide');
+      $('#btnInstall').classList.add('hide');
+      $('#installHint').textContent='No iPhone: toque em Compartilhar ⬆️ e em "Adicionar à Tela de Início".';}
+  }
+})();
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{navigator.serviceWorker.register('sw.js').catch(()=>{});});
+}
+
+initAuth();
+</script>
+</body>
+</html>

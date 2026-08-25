@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#12307a">
+<!-- CSP: só falamos com o próprio Supabase (Realtime via wss + REST não é usado aqui).
+     Sem exfiltração para terceiros. O anon key é público por design. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  base-uri 'self';
+  object-src 'none';
+  script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src 'self' https://fonts.gstatic.com;
+  img-src 'self' data:;
+  connect-src 'self' https://qkhpvqepgozsaamxmugk.supabase.co wss://qkhpvqepgozsaamxmugk.supabase.co;
+  frame-src 'none'; worker-src 'self'; manifest-src 'self'; form-action 'self';">
+<title>Vitrine · Display do Cliente</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&amp;family=Nunito:wght@400;600;700;800&amp;display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8"
+        integrity="sha384-Tve8O+C6PBzsIMK/IRCwHbi8fyEzXIlIs6OfVBZHubplwYhaQF/4Mzxqgg+pp/oy"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!-- Gerador de QR local (qrcode-generator, MIT) — o QR do PIX é gerado no próprio
+     aparelho; o código nunca sai daqui e funciona offline (cacheado pelo SW). -->
+<script src="lib/qrcode.js"></script>
+<link rel="manifest" href="vitrine.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vitrine">
+<script>
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
+</script>
+<style>
+:root{
+  --dark:#12307a; --dark2:#0e2660; --accent:#ffcf3f; --green:#22a65a; --ink:#eaf0ff;
+  --focus:#5e6ad2; /* lavanda Linear — acento coerente com os demais arquivos */
+  --card:rgba(255,255,255,.05); --line:rgba(255,255,255,.11);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{min-height:100%;overscroll-behavior:none}
+body{font-family:'Nunito',sans-serif;background:linear-gradient(160deg,#0e2660,#12307a 60%,#173a8a);
+  color:var(--ink);user-select:none;min-height:100dvh}
+h1,h2,h3{font-family:'Fredoka',sans-serif;font-weight:600;letter-spacing:-.3px}
+.wrap{min-height:100dvh;display:flex;flex-direction:column;padding:clamp(12px,2.5vw,30px);gap:clamp(10px,2vw,22px)}
+
+/* header */
+.top{display:flex;align-items:center;gap:14px}
+.logo{font-size:clamp(30px,4vw,46px)}
+.brand{flex:1;min-width:0}
+.brand .store{font-size:clamp(20px,2.6vw,32px);font-weight:800;font-family:'Fredoka'}
+.brand .hi{opacity:.8;font-size:clamp(13px,1.5vw,18px)}
+.dot{width:12px;height:12px;border-radius:50%;background:#e0b23a;box-shadow:0 0 0 4px rgba(255,255,255,.08)}
+.dot.on{background:var(--green)} .dot.off{background:#d94b45}
+.gear{background:var(--card);border:1px solid var(--line);color:var(--ink);border-radius:12px;
+  width:44px;height:44px;font-size:20px;cursor:pointer}
+
+/* customer banner */
+.cust{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:clamp(12px,1.6vw,20px) clamp(16px,2vw,26px);
+  display:flex;align-items:center;gap:16px;min-height:78px}
+.cust .who{flex:1;min-width:0}
+.cust .name{font-size:clamp(20px,2.6vw,30px);font-weight:800;font-family:'Fredoka';white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cust .sub{opacity:.8;font-size:clamp(12px,1.4vw,16px)}
+.cust .cb{text-align:right;flex:none}
+.cust .cb .lbl{font-size:clamp(11px,1.2vw,14px);opacity:.8;text-transform:uppercase;letter-spacing:.5px}
+.cust .cb .val{font-size:clamp(24px,3.4vw,44px);font-weight:800;font-family:'Fredoka';color:var(--accent);line-height:1}
+.cust.anon{opacity:.9}
+.cust.anon .name{color:var(--accent)}
+
+/* main split */
+.main{flex:1;display:flex;gap:clamp(12px,2vw,22px);min-height:0}
+
+/* cart */
+.cart{flex:1.3;background:var(--card);border:1px solid var(--line);border-radius:18px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.cart h3{padding:14px 20px;border-bottom:1px solid var(--line);font-size:clamp(15px,1.8vw,20px);display:flex;gap:8px;align-items:center}
+.items{flex:1;overflow:auto;overscroll-behavior:contain;padding:6px 8px}
+.item{display:flex;align-items:baseline;gap:12px;padding:clamp(9px,1.3vw,14px) clamp(10px,1.4vw,16px);border-radius:12px}
+.item:nth-child(odd){background:rgba(255,255,255,.04)}
+.item .q{flex:none;min-width:64px;font-weight:800;font-family:'Fredoka';color:var(--accent);font-size:clamp(15px,1.8vw,21px)}
+.item .nm{flex:1;min-width:0;font-size:clamp(15px,1.8vw,21px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .pr{flex:none;font-weight:700;font-size:clamp(15px,1.8vw,21px)}
+.item.new{animation:pop .5s ease}
+@keyframes pop{0%{background:rgba(255,207,63,.4);transform:scale(1.01)}100%{}}
+.empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:14px;opacity:.85;padding:20px}
+.empty .big{font-size:clamp(40px,7vw,90px)}
+.empty .msg{font-size:clamp(18px,2.4vw,30px);font-weight:700;font-family:'Fredoka'}
+.total{border-top:1px solid var(--line);padding:clamp(12px,1.7vw,20px) clamp(16px,2vw,26px);display:flex;align-items:center;justify-content:space-between}
+.total .l{font-size:clamp(16px,2vw,24px);font-weight:700}
+.total .v{font-size:clamp(30px,4.6vw,58px);font-weight:800;font-family:'Fredoka';color:var(--accent);line-height:1}
+
+/* pinpad */
+.pad{flex:1;max-width:420px;background:var(--card);border:1px solid var(--line);border-radius:18px;
+  padding:clamp(12px,1.7vw,20px);display:flex;flex-direction:column;gap:clamp(8px,1.2vw,14px);min-height:0}
+.pad .ttl{font-size:clamp(14px,1.7vw,19px);font-weight:700;font-family:'Fredoka';text-align:center;opacity:.95}
+.cpf{background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:14px;text-align:center;
+  padding:clamp(10px,1.4vw,16px);font-size:clamp(22px,3vw,36px);font-weight:800;font-family:'Fredoka';letter-spacing:2px;min-height:56px}
+.cpf.ph{opacity:.45;letter-spacing:1px;font-weight:600}
+.keys{flex:1;display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:minmax(46px,1fr);gap:clamp(7px,1vw,12px);min-height:0}
+.key{background:rgba(255,255,255,.1);border:1px solid var(--line);color:var(--ink);border-radius:14px;
+  font-size:clamp(22px,3vw,34px);font-weight:700;font-family:'Fredoka';cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:transform .06s,background .12s}
+.key:active{transform:scale(.95);background:rgba(255,255,255,.22)}
+.go{background:var(--accent);color:#3a2a00;border:none;border-radius:14px;padding:clamp(12px,1.6vw,18px);
+  font-size:clamp(17px,2vw,24px);font-weight:800;font-family:'Fredoka';cursor:pointer}
+.go:disabled{opacity:.45;cursor:default}
+.padmsg{text-align:center;font-size:clamp(13px,1.5vw,17px);min-height:22px;opacity:.9}
+.padmsg.err{color:#ffd4d1} .padmsg.ok{color:#bff0d0}
+.reidentify{text-align:center}
+.linkbtn{background:none;border:none;color:var(--accent);font-size:clamp(14px,1.6vw,18px);text-decoration:underline;cursor:pointer;font-family:'Nunito';font-weight:700}
+
+/* banner de instalação (PWA) */
+.install{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:60;display:none;
+  align-items:center;gap:12px;max-width:min(560px,calc(100% - 24px));width:max-content;
+  background:#0e2660;border:1px solid var(--line);border-radius:14px;padding:10px 12px 10px 16px;
+  box-shadow:0 12px 40px rgba(0,0,0,.45)}
+.install.show{display:flex}
+.install .ico{font-size:24px;flex:none}
+.install .txt{flex:1;min-width:0;font-size:14px;line-height:1.3}
+.install .txt b{font-family:'Fredoka'}
+.install button{border:none;border-radius:10px;padding:10px 14px;font-weight:800;font-family:'Fredoka';cursor:pointer;flex:none}
+.install .yes{background:var(--accent);color:#3a2a00}
+.install .no{background:rgba(255,255,255,.1);color:var(--ink);padding:10px 12px}
+.cfg .instrow{display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.cfg .instrow span{flex:1;font-size:13px;opacity:.9}
+.cfg .instrow button{padding:9px 14px;border-radius:10px;border:none;background:var(--accent);color:#3a2a00;font-weight:800;cursor:pointer}
+
+/* ---------- RESPONSIVO ---------- */
+/* Tablet retrato / telas estreitas: empilha carrinho e pinpad; carrinho com altura
+   limitada (rola por dentro) para o pinpad caber; a página rola se precisar. */
+@media (max-width:860px){
+  body{overflow-y:auto}
+  .wrap{min-height:100dvh}
+  .main{flex-direction:column}
+  .cart{flex:0 0 auto;max-height:42dvh}
+  .pad{flex:0 0 auto;max-width:none}
+}
+/* Celular pequeno: compacta textos e alvos de toque. */
+@media (max-width:480px){
+  .cust{min-height:0;flex-wrap:wrap}
+  .cust .name{white-space:normal}
+  .cust .cb{text-align:left}
+  .cart{max-height:38dvh}
+  .item .q{min-width:52px}
+  .install{left:12px;right:12px;transform:none;width:auto;max-width:none}
+}
+/* Paisagem baixa (celular deitado): mantém lado a lado, encolhe alturas. */
+@media (max-height:520px) and (orientation:landscape){
+  .cust{min-height:0}
+  .main{flex-direction:row}
+  .cart{flex:1.3;max-height:none}
+  .pad{flex:1}
+  .keys{grid-auto-rows:minmax(34px,1fr)}
+  .empty .big{font-size:44px}
+}
+
+/* overlay de pagamento (PIX / cartão) */
+.pay{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;padding:clamp(16px,3vw,40px);
+  background:linear-gradient(160deg,#0e2660,#12307a 60%,#173a8a)}
+.pay.show{display:flex}
+.pcard{width:min(560px,100%);text-align:center;background:var(--card);border:1px solid var(--line);border-radius:24px;
+  padding:clamp(20px,3vw,40px);display:flex;flex-direction:column;align-items:center;gap:clamp(10px,1.6vw,18px)}
+.pcard .picon{font-size:clamp(48px,8vw,96px);line-height:1}
+.pcard .ph{font-size:clamp(22px,3.2vw,40px);font-weight:800;font-family:'Fredoka';line-height:1.15}
+.pcard .pamt{font-size:clamp(30px,5vw,64px);font-weight:800;font-family:'Fredoka';color:var(--accent);line-height:1}
+.pcard .psub{font-size:clamp(15px,1.9vw,24px);opacity:.9;display:flex;align-items:center;gap:10px;justify-content:center;flex-wrap:wrap}
+.pcard .qr{background:#fff;border-radius:18px;padding:clamp(10px,1.4vw,18px);line-height:0}
+.pcard .qr img{width:clamp(200px,34vw,340px);height:clamp(200px,34vw,340px);display:block;image-rendering:pixelated}
+.pcard.ok{border-color:rgba(34,166,90,.6);background:rgba(34,166,90,.14)}
+.pcard.bad{border-color:rgba(217,75,69,.6);background:rgba(217,75,69,.14)}
+.pcard.card .picon{animation:cardpulse 1.3s ease-in-out infinite}
+@keyframes cardpulse{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+.spin{width:20px;height:20px;border:3px solid rgba(255,255,255,.25);border-top-color:var(--accent);border-radius:50%;
+  display:inline-block;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* config overlay */
+.ov{position:fixed;inset:0;background:rgba(6,14,38,.75);display:none;align-items:center;justify-content:center;padding:20px;z-index:50;overflow:auto;overscroll-behavior:contain}
+.ov.show{display:flex}
+.cfg{background:#12307a;border:1px solid var(--line);border-radius:18px;padding:22px;width:min(420px,100%);max-height:92dvh;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:12px}
+.cfg h3{font-size:20px}
+.cfg label{font-size:13px;opacity:.85}
+.cfg input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:rgba(0,0,0,.2);color:var(--ink);font-size:16px;font-family:inherit}
+.cfg .row{display:flex;gap:10px;justify-content:flex-end;margin-top:6px}
+.cfg button{padding:11px 18px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.1);color:var(--ink);font-weight:700;cursor:pointer}
+.cfg button.pri{background:var(--accent);color:#3a2a00;border:none}
+.hint{font-size:12px;opacity:.7;line-height:1.4}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div class="logo">🐾</div>
+    <div class="brand">
+      <div class="store" id="store">Pet Shop</div>
+      <div class="hi" id="hi">Seja bem-vindo!</div>
+    </div>
+    <span class="dot off" id="dot" title="conexão"></span>
+    <button class="gear" id="fs" title="Tela cheia">⛶</button>
+    <button class="gear" id="gear" title="Configurar">⚙️</button>
+  </div>
+
+  <div class="cust anon" id="cust">
+    <div class="who">
+      <div class="name" id="custName">Identifique-se e ganhe cashback 🐾</div>
+      <div class="sub" id="custSub">Digite seu CPF ao lado para ver seu saldo</div>
+    </div>
+    <div class="cb" id="custCb" style="display:none">
+      <div class="lbl">Cashback</div><div class="val" id="cbVal">R$ 0,00</div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="cart">
+      <h3>🛒 Sua compra</h3>
+      <div class="items" id="items">
+        <div class="empty" id="empty">
+          <div class="big">🐶🐱</div>
+          <div class="msg">Aguardando o atendente iniciar sua compra…</div>
+        </div>
+      </div>
+      <div class="total"><span class="l">Total</span><span class="v" id="total">R$ 0,00</span></div>
+    </div>
+
+    <div class="pad" id="pad">
+      <div class="ttl">💳 Cashback — digite seu CPF</div>
+      <div class="cpf ph" id="cpf">000.000.000-00</div>
+      <div class="keys" id="keys"></div>
+      <button class="go" id="go" disabled>Ver meu cashback 🎁</button>
+      <div class="padmsg" id="padmsg"></div>
+      <div class="reidentify" id="reid" style="display:none">
+        <button class="linkbtn" id="reidBtn">Não é você? Trocar CPF</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pay" id="pay"><div id="payBody"></div></div>
+
+<div class="install" id="install">
+  <span class="ico">📲</span>
+  <span class="txt" id="installTxt"><b>Instalar a Vitrine</b><br>Abre em tela cheia, como um app.</span>
+  <button class="yes" id="installYes">Instalar</button>
+  <button class="no" id="installNo" title="Agora não">✕</button>
+</div>
+
+<div class="ov" id="ov">
+  <div class="cfg">
+    <h3>⚙️ Configurar vitrine</h3>
+    <div><label>Nome da loja (saudação)</label><input id="cfgStore" placeholder="Ex.: Pet Shop do Bairro"></div>
+    <div><label>Código do caixa (parear com o PDV)</label><input id="cfgTerm" placeholder="CAIXA-1"></div>
+    <div><label>Código de pareamento obrigatório</label><input id="cfgSecret" placeholder="Código de 16 caracteres" autocapitalize="characters"></div>
+    <div id="cfgError" class="padmsg err"></div>
+    <div class="hint">Os dois códigos precisam ser exatamente os mesmos que aparecem no PDV em <b>📺 Vitrine</b>. A vitrine não se conecta sem o código de pareamento completo.</div>
+    <div class="instrow" id="cfgInstallRow" style="display:none">
+      <span id="cfgInstallTxt">📲 Instale a Vitrine para abrir em tela cheia.</span>
+      <button id="cfgInstallBtn">Instalar</button>
+    </div>
+    <div class="row">
+      <button id="cfgCancel">Cancelar</button>
+      <button class="pri" id="cfgSave">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== config =====
+const SUPABASE_URL='https://qkhpvqepgozsaamxmugk.supabase.co';
+const SUPABASE_KEY='sb_publishable_rh5Whcvb9PFt9MI1iL6dlg_qS9BGRNw';
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=s=>document.querySelector(s);
+const BRL=n=>(Number(n)||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+const esc=s=>(s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const LS={ get:(k,d)=>{try{return localStorage.getItem(k)||d}catch(e){return d}}, set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}} };
+
+const cleanTerm=v=>(String(v||'CAIXA-1').replace(/[^A-Za-z0-9_-]/g,'').slice(0,40)||'CAIXA-1');
+let TERM=cleanTerm(LS.get('petapp_pdv_term','CAIXA-1')); // mesmo default do PDV
+let STORE=LS.get('petapp_cfd_store','Pet Shop');
+let SECRET=(LS.get('petapp_cfd_secret','')||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+let chan=null, cpf='', identified=false, lastKeys='';
+// nome do canal = caixa (+ código de pareamento, se houver). Precisa bater com o PDV.
+function chanName(){ return SECRET.length>=16 ? 'cfd-'+TERM+'-'+SECRET : ''; }
+
+// ===== saudação por horário =====
+function greeting(){const h=new Date().getHours();return h<12?'Bom dia':h<18?'Boa tarde':'Boa noite';}
+function paintHeader(){ $('#store').textContent=STORE; $('#hi').textContent=greeting()+', seja bem-vindo!'; }
+
+// ===== pinpad =====
+function fmtCpf(d){ d=d.slice(0,11);
+  let o=d; if(d.length>3)o=d.slice(0,3)+'.'+d.slice(3);
+  if(d.length>6)o=d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6);
+  if(d.length>9)o=d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6,9)+'-'+d.slice(9);
+  return o; }
+function paintCpf(){ const el=$('#cpf');
+  if(!cpf){ el.textContent='000.000.000-00'; el.classList.add('ph'); }
+  else{ el.textContent=fmtCpf(cpf); el.classList.remove('ph'); }
+  $('#go').disabled = cpf.length!==11;
+}
+function buildKeys(){
+  const k=$('#keys'); k.innerHTML='';
+  ['1','2','3','4','5','6','7','8','9','⌫','0','C'].forEach(lbl=>{
+    const b=document.createElement('button'); b.className='key'; b.textContent=lbl;
+    b.onclick=()=>{ setMsg('');
+      if(lbl==='⌫'){ cpf=cpf.slice(0,-1); }
+      else if(lbl==='C'){ cpf=''; }
+      else if(cpf.length<11){ cpf+=lbl; }
+      paintCpf();
+    };
+    k.appendChild(b);
+  });
+}
+function setMsg(t,cls){ const m=$('#padmsg'); m.textContent=t||''; m.className='padmsg'+(cls?' '+cls:''); }
+
+$('#go').onclick=()=>{
+  if(cpf.length!==11) return;
+  if(!chan){ setMsg('Sem conexão com o caixa. Chame o atendente.','err'); return; }
+  setMsg('Consultando…');
+  chan.send({ type:'broadcast', event:'cpf', payload:{ cpf } });
+  // timeout de cortesia caso o caixa não responda
+  clearTimeout(window._cpfTo);
+  window._cpfTo=setTimeout(()=>{ if(!identified) setMsg('O caixa não respondeu. Chame o atendente 🐾','err'); }, 6000);
+};
+$('#reidBtn').onclick=()=>{ resetIdentity(); };
+function resetIdentity(){ identified=false; cpf=''; paintCpf(); setMsg('');
+  $('#reid').style.display='none'; $('#keys').style.display=''; $('#go').style.display=''; $('#pad').querySelector('.ttl').style.display='';
+}
+
+// ===== render carrinho + cliente =====
+function renderState(st){
+  st=st||{};
+  const items=Array.isArray(st.items)?st.items:[];
+  if(items.length) hidePay();   // nova venda em andamento → tira qualquer card de pagamento
+  const box=$('#items');
+  if(!items.length){
+    box.innerHTML='<div class="empty" id="empty"><div class="big">🐶🐱</div>'
+      +'<div class="msg">Aguardando o atendente iniciar sua compra…</div></div>';
+  }else{
+    const sig=JSON.stringify(items.map(i=>[i.name,i.qty,i.price]));
+    box.innerHTML=items.map((it,idx)=>{
+      const q=(Number(it.qty)||0); const qs=Number.isInteger(q)?q+'x':q.toLocaleString('pt-BR')+'x';
+      const line=(Number(it.price)||0)*q-(Number(it.disc)||0);
+      return '<div class="item'+(idx===items.length-1?' new':'')+'"><span class="q">'+qs+'</span>'
+        +'<span class="nm">'+esc(it.name||'Item')+'</span>'
+        +'<span class="pr">'+BRL(line)+'</span></div>';
+    }).join('');
+    lastKeys=sig;
+  }
+  $('#total').textContent=BRL(st.total||0);
+
+  const cu=st.cust;
+  const cust=$('#cust');
+  if(cu && cu.name){
+    identified=true; clearTimeout(window._cpfTo);
+    cust.classList.remove('anon');
+    $('#custName').textContent='Olá, '+esc(cu.name)+'! 🎉';
+    $('#custSub').textContent='Que bom te ver por aqui 🐾';
+    $('#custCb').style.display=''; $('#cbVal').textContent=BRL(cu.cashback||0);
+    // recolhe o teclado, oferece trocar
+    $('#keys').style.display='none'; $('#go').style.display='none'; $('#pad').querySelector('.ttl').style.display='none';
+    $('#reid').style.display=''; setMsg('');
+  }else{
+    cust.classList.add('anon');
+    $('#custName').textContent='Identifique-se e ganhe cashback 🐾';
+    $('#custSub').textContent='Digite seu CPF ao lado para ver seu saldo';
+    $('#custCb').style.display='none';
+    if(identified){ resetIdentity(); }
+  }
+}
+
+// ===== overlay de pagamento (PIX / cartão) =====
+let payTimer=null;
+function hidePay(){ clearTimeout(payTimer); $('#pay').classList.remove('show'); }
+// Gera o QR do PIX localmente (sem serviço externo). Retorna um data URL (GIF).
+function qrDataURL(text){
+  try{ if(typeof qrcode==='undefined') return ''; const qr=qrcode(0,'M'); qr.addData(String(text||'')); qr.make(); return qr.createDataURL(6,2); }
+  catch(e){ return ''; }
+}
+function renderPay(p){
+  p=p||{}; const box=$('#pay'), body=$('#payBody'); clearTimeout(payTimer);
+  if(p.status==='clear'){ hidePay(); return; }
+  if(p.status==='pix_wait'){
+    const img = (p.qrImage && /^data:/.test(p.qrImage)) ? p.qrImage
+      : (p.qrText ? qrDataURL(p.qrText)
+      : (p.qrImage||''));
+    if(p.machine && !img){
+      body.innerHTML='<div class="pcard pix"><div class="ph">Pague com PIX</div>'
+        +'<div class="picon">📟</div>'
+        +'<div class="pamt">'+BRL(p.amount||0)+'</div>'
+        +'<div class="psub"><span class="spin"></span> Escaneie o QR no visor da maquininha</div></div>';
+    } else {
+      body.innerHTML='<div class="pcard pix"><div class="ph">Pague com PIX</div>'
+        +(img?'<div class="qr"><img alt="QR Code PIX" src="'+esc(img)+'"></div>':'<div class="psub">Gerando QR…</div>')
+        +'<div class="pamt">'+BRL(p.amount||0)+'</div>'
+        +'<div class="psub">📱 Abra o app do seu banco e aponte a câmera no código</div></div>';
+    }
+  } else if(p.status==='card_wait'){
+    body.innerHTML='<div class="pcard card"><div class="picon">💳</div>'
+      +'<div class="ph">Aproxime, insira ou passe o cartão</div>'
+      +'<div class="pamt">'+BRL(p.amount||0)+'</div>'
+      +'<div class="psub"><span class="spin"></span> '+esc(p.sub||'Aguardando o cartão…')+'</div></div>';
+  } else if(p.status==='approved'){
+    body.innerHTML='<div class="pcard ok"><div class="picon">✅</div><div class="ph">Pagamento aprovado!</div>'
+      +'<div class="pamt">'+BRL(p.amount||0)+'</div><div class="psub">Obrigado pela preferência 🐾</div></div>';
+    payTimer=setTimeout(hidePay,6000);
+  } else if(p.status==='declined'){
+    body.innerHTML='<div class="pcard bad"><div class="picon">❌</div><div class="ph">Pagamento não aprovado</div>'
+      +'<div class="psub">'+esc(p.msg||'Tente outro cartão ou fale com o atendente.')+'</div></div>';
+    payTimer=setTimeout(hidePay,7000);
+  } else { hidePay(); return; }
+  box.classList.add('show');
+}
+
+// ===== realtime =====
+function connect(){
+  if(chan){ try{ sb.removeChannel(chan); }catch(e){} chan=null; }
+  $('#dot').className='dot off';
+  const name=chanName();
+  if(!name){ $('#dot').title='Pareamento obrigatório'; return; }
+  chan=sb.channel(name,{ config:{ broadcast:{ self:false } } })
+    .on('broadcast',{event:'state'}, m=> renderState(m.payload))
+    .on('broadcast',{event:'pay'}, m=> renderPay(m.payload))
+    .on('broadcast',{event:'cpf_result'}, m=>{
+      const p=m.payload||{};
+      if(p.found===false){ setMsg('CPF não encontrado. Peça um cadastro ao atendente 🐾','err'); }
+      else if(p.blocked){ setMsg('Cadastro indisponível. Fale com o atendente.','err'); }
+    })
+    .subscribe(status=>{
+      if(status==='SUBSCRIBED'){ $('#dot').className='dot on';
+        chan.send({ type:'broadcast', event:'hello', payload:{} }); } // pede o estado atual ao caixa
+      else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'){ $('#dot').className='dot off'; }
+      else if(status==='CLOSED'){ $('#dot').className='dot off'; }
+    });
+}
+
+// ===== instalar como app (PWA) =====
+let deferredPrompt=null;
+const isStandalone=()=> (window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone===true;
+const isIOS=()=> /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+const INSTALL_DISMISS='petapp_cfd_install_dismissed';
+function installState(){ if(isStandalone())return 'installed'; if(deferredPrompt)return 'prompt'; if(isIOS())return 'ios'; return 'none'; }
+function refreshInstallUI(){
+  const st=installState(), banner=$('#install'), row=$('#cfgInstallRow');
+  if(st==='prompt'||st==='ios'){
+    row.style.display='';
+    if(st==='ios'){ $('#cfgInstallTxt').textContent='📲 Para instalar: toque em Compartilhar e “Adicionar à Tela de Início”.'; $('#cfgInstallBtn').style.display='none'; }
+    else { $('#cfgInstallTxt').textContent='📲 Instale a Vitrine para abrir em tela cheia.'; $('#cfgInstallBtn').style.display=''; }
+    if(LS.get(INSTALL_DISMISS,'')!=='1'){
+      if(st==='ios'){ $('#installTxt').innerHTML='<b>Instalar a Vitrine</b><br>Toque em Compartilhar e “Adicionar à Tela de Início”.'; $('#installYes').style.display='none'; }
+      else { $('#installTxt').innerHTML='<b>Instalar a Vitrine</b><br>Abre em tela cheia, como um app.'; $('#installYes').style.display=''; }
+      banner.classList.add('show');
+    } else banner.classList.remove('show');
+  }else{ row.style.display='none'; banner.classList.remove('show'); }
+}
+async function doInstall(){ if(!deferredPrompt)return; deferredPrompt.prompt(); try{ await deferredPrompt.userChoice; }catch(e){} deferredPrompt=null; refreshInstallUI(); }
+window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); deferredPrompt=e; refreshInstallUI(); });
+window.addEventListener('appinstalled', ()=>{ deferredPrompt=null; LS.set(INSTALL_DISMISS,'1'); refreshInstallUI(); });
+$('#installYes').onclick=doInstall;
+$('#cfgInstallBtn').onclick=doInstall;
+$('#installNo').onclick=()=>{ LS.set(INSTALL_DISMISS,'1'); refreshInstallUI(); };
+
+// ===== tela cheia =====
+function toggleFullscreen(){
+  try{
+    const p = document.fullscreenElement
+      ? (document.exitFullscreen||document.webkitExitFullscreen).call(document)
+      : (function(el){ return (el.requestFullscreen||el.webkitRequestFullscreen).call(el); })(document.documentElement);
+    if(p&&p.catch) p.catch(()=>{});   // rejeição assíncrona (sem gesto/permissão) — ignora
+  }catch(e){}
+}
+$('#fs').onclick=toggleFullscreen;
+document.addEventListener('fullscreenchange',()=>{ $('#fs').title=document.fullscreenElement?'Sair da tela cheia':'Tela cheia'; $('#fs').style.opacity=document.fullscreenElement?'.7':''; });
+// navegadores sem Fullscreen API (ex.: iPhone) ou já em app instalado: some com o botão
+if(!document.documentElement.requestFullscreen || isStandalone()){ $('#fs').style.display='none'; }
+
+// ===== config UI =====
+function openCfg(){ $('#cfgStore').value=STORE; $('#cfgTerm').value=TERM; $('#cfgSecret').value=SECRET; $('#cfgError').textContent=''; refreshInstallUI(); $('#ov').classList.add('show'); }
+$('#gear').onclick=openCfg;
+$('#cfgCancel').onclick=()=>$('#ov').classList.remove('show');
+$('#cfgSave').onclick=()=>{
+  const nextSecret=($('#cfgSecret').value||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+  if(nextSecret.length<16){ $('#cfgError').textContent='Informe o código completo de 16 caracteres exibido no PDV.'; return; }
+  STORE=($('#cfgStore').value||'Pet Shop').trim().slice(0,80)||'Pet Shop';
+  TERM=cleanTerm($('#cfgTerm').value);
+  SECRET=nextSecret.slice(0,64);
+  LS.set('petapp_cfd_store',STORE); LS.set('petapp_pdv_term',TERM); LS.set('petapp_cfd_secret',SECRET);
+  $('#ov').classList.remove('show'); paintHeader(); resetIdentity(); connect();
+};
+
+// ===== boot =====
+buildKeys(); paintCpf(); paintHeader(); if(SECRET.length>=16)connect();else openCfg(); refreshInstallUI();
+setInterval(paintHeader, 60000);           // atualiza saudação (manhã/tarde/noite)
+// reconecta ao voltar do background (tablet economizando energia)
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && (!chan)) connect(); });
+</script>
+</body>
+</html>
