@@ -472,6 +472,11 @@ body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 .pdv-btn.mini{padding:5px 10px;font-size:12.5px;border-width:2px}
 .pdv-btn.solid{background:#12307a;color:#fff}
 .pdv-btn.solid:hover{background:#ffd76a;color:#12307a}
+/* .pdv-btn.solid usa fundo #12307a — a MESMA cor do modal escuro (.pdv-mod). Direto
+   sobre o modal (fora das listas brancas), o botão "some". Nos rodapés de ação (.pdv-btns)
+   damos a ele o âmbar da marca, mantendo a hierarquia primário (âmbar) / fantasma (contorno). */
+.pdv-mod .pdv-btns .pdv-btn.solid{background:#ffcf3f;color:#12307a}
+.pdv-mod .pdv-btns .pdv-btn.solid:hover{background:#ffd76a;color:#12307a}
 .pdv-tag{display:inline-block;background:#e7edfb;color:#12307a;border:1px solid #c7d3ee;border-radius:999px;
   padding:1px 8px;font-size:11px;font-weight:900;white-space:nowrap}
 .pdv-tag.warn{background:#ffe3e3;border-color:#f3b6b6;color:#9d2e2e}
