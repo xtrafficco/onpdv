@@ -489,6 +489,17 @@ body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 .pdv-opps{display:grid;gap:7px}
 .pdv-opp{background:#0e2660;border:1px solid #365bb4;border-radius:5px;padding:9px;color:#fff}
 .pdv-opp b{color:#ffd76a}.pdv-opp .pdv-note{margin-top:2px}
+/* uiConfirm / uiPrompt (diálogos .ov > .modal) dentro do caixa: casam com o modal
+   escuro do PDV em vez do card branco do back-office. Escopado a body.pdv-mode para
+   não afetar as telas claras do ERP, que continuam usando o mesmo componente. */
+body.pdv-mode .ov .modal{background:var(--dark);color:#fff;border:1px solid #2b4a95;border-radius:8px;box-shadow:0 24px 60px rgba(0,0,0,.55)}
+body.pdv-mode .ov .modal h1,body.pdv-mode .ov .modal h2,body.pdv-mode .ov .modal h3,body.pdv-mode .ov .modal h4,body.pdv-mode .ov .modal p{color:#fff}
+body.pdv-mode .ov .modal .m-head,body.pdv-mode .ov .modal .m-foot{border-color:#2b4a95}
+body.pdv-mode .ov .modal .m-head button{color:#cdd9f5}
+body.pdv-mode .ov .modal .in{background:#0e2660;border-color:#2b4a95;color:#fff}
+body.pdv-mode .ov .modal .in::placeholder{color:#8ea3cf}
+body.pdv-mode .ov .modal .btn.ghost{background:transparent;border-color:rgba(255,255,255,.6);color:#fff}
+body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filter:none}
 .pdv-opp button{margin-top:7px;width:100%}
 .pdv-chip{display:inline-flex;align-items:center;gap:5px;background:#ffd76a;color:#12307a;border-radius:999px;
   padding:3px 9px;font-size:11px;font-weight:900;white-space:nowrap}

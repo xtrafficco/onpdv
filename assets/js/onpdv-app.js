@@ -101,7 +101,7 @@ function uiConfirm(message, opts){
     const root=document.createElement('div'); root.className='ov'; root.style.zIndex='99999';
     root.innerHTML=`<div class="modal" role="alertdialog" aria-modal="true" aria-label="${esc(opts.title||'Confirmação')}" tabindex="-1" style="max-width:430px"><div class="m-body" style="padding:22px">
       ${opts.title?`<h3 style="margin:0 0 8px">${esc(opts.title)}</h3>`:''}
-      <p style="white-space:pre-line;line-height:1.5;color:var(--ink)">${esc(message)}</p>
+      <p style="white-space:pre-line;line-height:1.5">${esc(message)}</p>
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
         <button class="btn ghost" data-x="0">${esc(opts.cancelText||'Cancelar')}</button>
         <button class="btn ${opts.danger?'red':'green'}" data-x="1">${esc(opts.okText||'Confirmar')}</button>
@@ -121,7 +121,7 @@ function uiPrompt(message, def, opts){
     const returnFocus=document.activeElement;
     const root=document.createElement('div'); root.className='ov'; root.style.zIndex='99999';
     root.innerHTML=`<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(opts.title||message||'Informação necessária')}" tabindex="-1" style="max-width:430px"><div class="m-body" style="padding:22px">
-      <p style="white-space:pre-line;line-height:1.5;margin-bottom:10px;color:var(--ink)">${esc(message)}</p>
+      <p style="white-space:pre-line;line-height:1.5;margin-bottom:10px">${esc(message)}</p>
       <input class="in" id="_uipIn" ${opts.type==='number'?'inputmode="decimal"':''} value="${esc(def==null?'':String(def))}">
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
         <button class="btn ghost" data-x="0">${esc(opts.cancelText||'Cancelar')}</button>
@@ -1874,21 +1874,52 @@ async function pdvSendDeliveryPix(){
   if(PDV.busy)return;if(PDV.delivPixUnavailable){toast('Atualize o banco do ONPDV antes de usar o PIX de entrega');return;}if(!navigator.onLine){toast('O PIX para entrega exige internet');return;}
   let d;try{d=pdvDeliveryPayload();}catch(e){toast(e.message||String(e));return;}
   const phone=String((PDV_DL.dados&&PDV_DL.dados.telefone)||(PDV_DL.cust&&PDV_DL.cust.phone)||'').replace(/\D/g,'').replace(/^55/,'');
-  const shareWin=phone?window.open('about:blank','_blank'):null;
-  PDV.busy=true;const b=document.activeElement;if(b&&b.tagName==='BUTTON'){b.disabled=true;b.textContent='Gerando PIX...';}
+  const nome=(PDV_DL.cust&&PDV_DL.cust.name)||'Cliente';
+  // Não abrimos mais uma aba "about:blank" antecipada: com pop-up/redirect bloqueado
+  // (e COOP same-origin) ela ficava em branco. Geramos o PIX e mostramos QR + código
+  // na própria tela; o WhatsApp abre a partir de um clique direto do operador.
+  PDV.busy=true;
+  const b=document.activeElement; const bTxt=(b&&b.tagName==='BUTTON')?b.textContent:null;
+  if(b&&b.tagName==='BUTTON'){b.disabled=true;b.textContent='Gerando PIX...';}
   try{
     const {data,error}=await sb.functions.invoke('pdv-pix-payment',{body:{action:'create',kind:'entrega',sessionId:PDV.ses.id,customerId:PDV_DL.cust.id,
-      deliv:{items:d.items,frete:d.frete,endereco:d.end,obs:d.obs,origin_store:CURRENT_STORE,store:d.loja},payer:{name:(PDV_DL.cust.name||'Cliente'),email:(PDV_DL.cust.email||'')}}});
+      deliv:{items:d.items,frete:d.frete,endereco:d.end,obs:d.obs,origin_store:CURRENT_STORE,store:d.loja},payer:{name:nome,email:(PDV_DL.cust.email||'')}}});
     if(error)throw error;if(!data||!data.ok)throw new Error((data&&data.error)||'Não foi possível gerar o PIX');
-    if(phone&&data.qrCode){
-      const msg='Olá, '+(PDV_DL.cust.name||'')+'! Segue o PIX da sua compra para entrega, no valor de '+BRL(data.total)+':\n\n'+data.qrCode+'\n\nAssim que o pagamento for confirmado, seu pedido seguirá para entrega.';
-      if(shareWin)shareWin.location='https://wa.me/55'+phone+'?text='+encodeURIComponent(msg);
-    }else if(shareWin)shareWin.close();
-    pdvResetDraft();pdvCloseModal();renderCaixa();await pdvLoadDeliveryPixQueue(false);
-    toast(phone?'PIX enviado · pedido aguardando pagamento':'PIX gerado · copie o código na fila de espera para enviar ao cliente');
-  }catch(e){if(shareWin)shareWin.close();console.error(e);toast(pdvErr(e));if(b&&b.tagName==='BUTTON'){b.disabled=false;b.textContent='📲 Enviar PIX ao cliente e aguardar';}}
-  finally{PDV.busy=false;}
+    pdvResetDraft();renderCaixa();await pdvLoadDeliveryPixQueue(false);pdvDelivCount();
+    pdvDeliveryPixResultModal({qrCode:data.qrCode||'',qrCodeBase64:data.qrCodeBase64||'',total:data.total,phone,nome});
+  }catch(e){console.error(e);toast(pdvErr(e));}
+  finally{PDV.busy=false;if(b&&b.tagName==='BUTTON'&&b.isConnected){b.disabled=false;if(bTxt!=null)b.textContent=bTxt;}}
 }
+function pdvDeliveryPixResultModal(o){
+  o=o||{};
+  const waMsg='Olá, '+(o.nome||'')+'! Segue o PIX da sua compra para entrega, no valor de '+BRL(o.total)
+    +':\n\n'+(o.qrCode||'')+'\n\nAssim que o pagamento for confirmado, seu pedido seguirá para entrega.';
+  PDV._delivPixWaMsg=waMsg;
+  pdvModal('PIX da entrega gerado ⚡',
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;align-items:start">'
+      +'<div class="pdv-qr">'+(o.qrCodeBase64?'<img alt="QR Code PIX" src="data:image/png;base64,'+o.qrCodeBase64+'">':'<div class="pdv-note">QR indisponível — use o código copia e cola ao lado.</div>')+'</div>'
+      +'<div>'
+        +'<div class="pdv-status-wait">⏳ Aguardando o pagamento · '+BRL(o.total)+'</div>'
+        +'<div class="pdv-note" style="margin:10px 0">Assim que o Mercado Pago confirmar, o pedido aparece em <b>Fila de entrega</b> pronto para sair.</div>'
+        +(o.qrCode?'<textarea class="pdv-in" id="pdvDlPixCode" readonly style="height:72px;font-size:11px">'+esc(o.qrCode)+'</textarea>'
+          +'<button class="pdv-btn" style="width:100%;margin-top:7px" data-onclick="pdvCopyDeliveryPix()">📋 Copiar código PIX</button>':'')
+        +(o.phone?'<button class="pdv-btn pix" style="width:100%;margin-top:7px" data-onclick="pdvDeliveryPixWhats(\''+o.phone+'\')">📲 Enviar no WhatsApp</button>'
+          :'<div class="pdv-note" style="margin-top:7px">Cliente sem telefone cadastrado — copie o código e envie você mesmo.</div>')
+      +'</div>'
+    +'</div>'
+    +'<div class="pdv-btns"><button class="pdv-btn ghost" data-pdv-close>Fechar</button></div>',true);
+}
+function pdvCopyDeliveryPix(){
+  const e=document.getElementById('pdvDlPixCode');if(!e)return;
+  if(navigator.clipboard)navigator.clipboard.writeText(e.value).then(()=>toast('PIX copiado ✓'));
+  else{e.select();document.execCommand('copy');toast('PIX copiado ✓');}
+}
+function pdvDeliveryPixWhats(phone){
+  window.open('https://wa.me/55'+String(phone).replace(/\D/g,'')+'?text='+encodeURIComponent(PDV._delivPixWaMsg||''),'_blank');
+}
+window.pdvSendDeliveryPix=pdvSendDeliveryPix;
+window.pdvCopyDeliveryPix=pdvCopyDeliveryPix;
+window.pdvDeliveryPixWhats=pdvDeliveryPixWhats;
 function pdvDeliveryPixQueueModal(){
   const list=PDV.delivPix||[];
   pdvModal('Entregas aguardando PIX ⚡',list.length?'<div class="pdv-list"><table><thead><tr><th>Cliente</th><th>Status</th><th class="r">Total</th><th></th></tr></thead><tbody>'
@@ -1971,6 +2002,9 @@ async function pdvDeliveryQueue(){
       +'<tbody>'+arr.map(x=>linha(x,tipo)).join('')+'</tbody></table></div>'
       :'<div class="pdv-note">'+vazio+'</div>')+'</div>';
   box.outerHTML='<div id="pdvDlQ">'
+    +'<div class="pdv-btns" style="margin:0 0 12px">'
+      +'<button class="pdv-btn solid" data-onclick="pdvDeliveryMapModal()">🗺️ Ver mapa · rastrear motoboy</button>'
+    +'</div>'
     +'<div class="pdv-row" style="gap:8px;flex-wrap:wrap;margin-bottom:12px">'
       +'<div class="pdv-note" style="flex:1">Prontos para sair<br><b style="font-size:19px">'+(r.fila||0)+'</b></div>'
       +'<div class="pdv-note" style="flex:1">Em rota<br><b style="font-size:19px">'+(r.rota||0)+'</b></div>'
@@ -2030,6 +2064,57 @@ window.pdvDelivSet=async (id,st)=>{
   toast(st==='em_rota'?'Saiu para entrega 🛵':'Entrega concluída ✅');
   pdvDelivCount(); pdvDeliveryQueue();
 };
+
+/* ---------- mapa de rastreio em tempo real, aberto direto da fila de entrega ---------- */
+let PDV_TRK={map:null,layer:null,timer:null,fitted:false};
+function pdvTrkStop(){ if(PDV_TRK.timer){clearInterval(PDV_TRK.timer);PDV_TRK.timer=null;} PDV_TRK.map=null;PDV_TRK.layer=null;PDV_TRK.fitted=false; }
+async function pdvDeliveryMapModal(){
+  pdvTrkStop();
+  pdvModal('Rastrear entregas no mapa 🗺️',
+    '<div id="pdvTrkStatus" class="pdv-note" style="margin-bottom:8px">Carregando o mapa…</div>'
+    +'<div id="pdvTrkMap" style="height:min(62vh,520px);border-radius:12px;overflow:hidden;background:#0b1830"></div>'
+    +'<div class="pdv-btns"><button class="pdv-btn ghost" data-onclick="pdvDeliveryQueue()">← Voltar para a fila</button></div>', true);
+  const st=document.getElementById('pdvTrkStatus');
+  if(typeof L==='undefined'){ if(st)st.textContent='Mapa indisponível (offline). Reconecte para rastrear.'; return; }
+  const el=document.getElementById('pdvTrkMap'); if(!el) return;
+  PDV_TRK.map=L.map(el,{zoomControl:true}).setView([-14.235,-51.925],4);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(PDV_TRK.map);
+  PDV_TRK.layer=L.layerGroup().addTo(PDV_TRK.map);
+  setTimeout(()=>{try{PDV_TRK.map.invalidateSize();}catch(e){}},200);
+  await pdvTrkRefresh();
+  PDV_TRK.timer=setInterval(()=>{ if(!document.getElementById('pdvTrkMap')){pdvTrkStop();return;} pdvTrkRefresh(); },6000);
+}
+async function pdvTrkRefresh(){
+  if(!PDV_TRK.map)return;
+  const st=document.getElementById('pdvTrkStatus');
+  let data;
+  try{ const r=await sb.rpc('erp_delivery_tracking',{p_minutos:240}); if(r.error)throw r.error; data=r.data||{}; }
+  catch(e){ if(st)st.textContent='Sem conexão com o rastreio agora. Tentando de novo…'; return; }
+  PDV_TRK.layer.clearLayers();
+  const pts=[];
+  (data.lojas||[]).forEach(s=>{ if(s.lat==null||s.lng==null)return;
+    L.marker([s.lat,s.lng],{icon:trkIcon('🏪','#12307a'),title:s.nome}).addTo(PDV_TRK.layer)
+      .bindPopup('<b>🏪 '+esc(s.nome||'Loja')+'</b><br>'+esc(s.endereco||'')); pts.push([s.lat,s.lng]); });
+  (data.entregas||[]).forEach(d=>{ if(d.lat==null||d.lng==null)return;
+    const ring=d.status==='em_rota'?'#e2a400':(d.status==='entregue'?'#22a65a':'#3b7de0');
+    L.marker([d.lat,d.lng],{icon:trkIcon('📦',ring),title:'#'+(d.venda_numero||'')}).addTo(PDV_TRK.layer)
+      .bindTooltip('#'+(d.venda_numero||'')+' · '+esc(d.cliente||''),{direction:'top'}); pts.push([d.lat,d.lng]); });
+  let online=0;
+  (data.motoboys||[]).forEach(mb=>{
+    const trail=(mb.trail||[]).filter(p=>p.lat!=null&&p.lng!=null).map(p=>[p.lat,p.lng]);
+    if(trail.length>1){ L.polyline(trail,{color:mb.online?'#22a65a':'#8aa0c8',weight:4,opacity:.75}).addTo(PDV_TRK.layer); trail.forEach(p=>pts.push(p)); }
+    if(mb.lat!=null&&mb.lng!=null){ if(mb.online)online++;
+      const when=mb.at?fmtDT(mb.at):'—';
+      L.marker([mb.lat,mb.lng],{icon:trkIcon('🛵',mb.online?'#22a65a':'#8aa0c8'),title:mb.nome,zIndexOffset:1000}).addTo(PDV_TRK.layer)
+        .bindPopup('<b>🛵 '+esc(mb.nome||'Motoboy')+'</b><br>'+(mb.online?'🟢 online agora':'⚪ offline · última posição '+when)+'<br>Em rota: <b>'+(mb.em_rota||0)+'</b> · Entregues hoje: <b>'+(mb.entregues||0)+'</b>');
+      pts.push([mb.lat,mb.lng]); }
+  });
+  if(st) st.textContent=(data.motoboys||[]).length
+    ? (online+' motoboy(s) online · atualizado '+new Date().toLocaleTimeString('pt-BR'))
+    : 'Nenhum motoboy com posição ainda. O app do entregador precisa estar aberto e com GPS.';
+  if(pts.length&&!PDV_TRK.fitted){ try{ PDV_TRK.map.fitBounds(pts,{padding:[30,30],maxZoom:16}); PDV_TRK.fitted=true; }catch(e){} }
+}
+window.pdvDeliveryMapModal=pdvDeliveryMapModal;
 
 /* ================= CREDIÁRIO NO PDV ================= */
 const PDV_CRED={ cust:null, parcelas:[], sel:{} };
