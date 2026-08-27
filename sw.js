@@ -3,7 +3,7 @@
 //  • entregador.html → app do entregador
 // Estratégia: navegação = network-first (pega a versão nova; cai no cache quando offline);
 // estáticos (ícones, lib) = cache-first. Chamadas ao Supabase NUNCA são cacheadas.
-const CACHE = 'onpdv-v36';
+const CACHE = 'onpdv-v37';
 // supabase-js fixado (mesma versão+SRI do HTML): pré-cacheado para os apps abrirem
 // offline mesmo se a CDN estiver fora do ar.
 const SUPABASE_LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8';
