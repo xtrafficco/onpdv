@@ -85,6 +85,15 @@ label{display:block;color:var(--muted);font-size:12px;font-weight:800;margin:11p
 #login .box{background:#fff;width:min(400px,100%);border-radius:20px;padding:26px;box-shadow:0 25px 60px #0006}
 #login h1{text-align:center;font:700 28px Fredoka;margin:0}.msg{min-height:20px;text-align:center;color:var(--red);font-size:13px;margin-top:10px}
 .toast{position:fixed;left:50%;bottom:calc(var(--navh) + 14px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--dark2);color:#fff;border-radius:12px;padding:12px 18px;font-weight:800;opacity:0;pointer-events:none;transition:.2s;z-index:99}.toast.show{opacity:1}
+/* seleção de parcelas + barra de pagamento único */
+.rcrow{align-items:center}
+.rck{width:22px;height:22px;flex:0 0 auto;accent-color:var(--dark);cursor:pointer;margin:0 2px 0 0}
+.rcrow .rcl{cursor:pointer;flex:1}
+.paybar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--navh) + env(safe-area-inset-bottom));z-index:20;width:min(480px,100%);background:#fff;border-top:1px solid var(--line);box-shadow:0 -8px 26px rgba(18,48,122,.14);padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:12px}
+.paybar.hide{display:none}
+.paybar .pb-info{line-height:1.15;min-width:96px}.paybar .pb-info small{display:block;color:var(--muted);font-size:12px}.paybar .pb-info b{font:700 19px Nunito}
+.paybar .btn{flex:1;white-space:nowrap}
+body.paybar-open .body{padding-bottom:calc(var(--navh) + 96px + env(safe-area-inset-bottom))}
 .modal{position:fixed;inset:0;background:rgba(8,20,50,.55);display:none;align-items:flex-end;justify-content:center;z-index:20}.modal.show{display:flex}
 .sheet{background:#fff;width:100%;max-width:480px;border-radius:20px 20px 0 0;padding:20px 18px calc(22px + env(safe-area-inset-bottom));box-shadow:0 -10px 40px rgba(0,0,0,.3);animation:up .22s ease;max-height:92vh;overflow:auto;overscroll-behavior:contain}
 @keyframes up{from{transform:translateY(30px);opacity:.6}to{transform:none;opacity:1}}
@@ -129,6 +138,10 @@ label{display:block;color:var(--muted);font-size:12px;font-weight:800;margin:11p
       <div id="cashback"></div>
       <div class="card"><h2>⚠️ Vencidas <span class="htot" id="overdueTot" style="color:var(--red)"></span></h2><div id="overdue"></div></div>
       <div class="card"><h2>📅 A vencer <span class="htot" id="upcomingTot"></span></h2><div id="upcoming"></div></div>
+      <div id="payBar" class="paybar hide" role="region" aria-label="Pagar parcelas selecionadas">
+        <div class="pb-info"><small><span id="payCount">0</span> selecionada(s)</small><b id="paySel">R$ 0,00</b></div>
+        <button class="btn" id="payBtn" type="button" onclick="paySelected()" disabled>💠 Pagar no PIX</button>
+      </div>
       <div class="card"><h2>🔁 Minhas assinaturas</h2><div id="subscriptions"></div></div>
       <div class="card"><h2>📄 Extrato do cashback</h2><div id="cashbackEntries"></div></div>
     </section>
@@ -323,13 +336,15 @@ async function load(){
       <div class="actions" style="margin-top:12px"><button class="btn sm" type="button" onclick="openHealthForm('${pet.id}')">+ Vacina ou cuidado</button></div></div>`;
   }).join(''):'<div class="empty">Nenhum pet cadastrado ainda.<br>Toque em <b>+ Pet</b> para começar. 🐶🐱</div>';
 
-  // Contas vencidas / a vencer
+  // Contas vencidas / a vencer — marque as parcelas e pague todas num único PIX
   const recRow=x=>{const d=daysUntil(x.due_on),over=isoDay(x.due_on)<TODAY;
-    return `<div class="row"><div><b>${BRL(x.amount)}</b> <span class="chip ${over?'warn':''}">${over?'venceu '+date(x.due_on):'vence '+date(x.due_on)}</span><br>
-      <span class="muted">parcela ${esc(x.installment||'')}/${esc(x.installments||'')}${x.sale_number?' · venda #'+esc(x.sale_number):''}${over&&d!=null?' · '+(-d)+' dia'+(d===-1?'':'s')+' em atraso':''}</span></div>
-      <button class="btn ${over?'red':''}" onclick="payReceivable('${x.id}')">Pagar</button></div>`;};
+    return `<div class="row rcrow">
+      <input type="checkbox" class="rck" id="rc_${x.id}" data-rid="${x.id}" data-amount="${x.amount}" aria-label="Selecionar parcela de ${BRL(x.amount)}">
+      <label class="rcl" for="rc_${x.id}"><b>${BRL(x.amount)}</b> <span class="chip ${over?'warn':''}">${over?'venceu '+date(x.due_on):'vence '+date(x.due_on)}</span><br>
+      <span class="muted">parcela ${esc(x.installment||'')}/${esc(x.installments||'')}${x.sale_number?' · venda #'+esc(x.sale_number):''}${over&&d!=null?' · '+(-d)+' dia'+(d===-1?'':'s')+' em atraso':''}</span></label></div>`;};
   $('#overdue').innerHTML=overdue.length?overdue.map(recRow).join(''):'<p class="muted">Nenhuma conta vencida. 🎉</p>';
   $('#upcoming').innerHTML=upcoming.length?upcoming.map(recRow).join(''):'<p class="muted">Nenhuma conta a vencer.</p>';
+  updatePayBar();
 
   $('#subscriptions').innerHTML=subs.map(x=>`<div class="row"><div><b>${esc(x.plan_name||'Assinatura')}</b><br><span class="muted">próximo ciclo ${date(x.next_run_on)} · ${x.interval_days} dias</span></div>
     <div><span class="chip ${x.status==='active'?'ok':'warn'}">${esc(x.status)}</span><br>
@@ -405,7 +420,11 @@ $('#healthForm').onsubmit=async e=>{
 };
 ['petModal','healthModal','pixModal','pwaInstallModal'].forEach(id=>$('#'+id).addEventListener('click',e=>{if(e.target.id===id){if(id==='pixModal')pixClose();else closeModal(id);}}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal('petModal');closeModal('healthModal');closePwaInstall();pixClose();}});
-$('#enter').onclick=async()=>{const email=$('#email').value.trim(),password=$('#password').value;if(!email||!password){$('#loginMsg').textContent='Preencha e-mail e senha.';return;}const b=$('#enter');b.disabled=true;$('#loginMsg').textContent='Entrando…';try{const {data,error}=await sb.auth.signInWithPassword({email,password});if(error||!data.session){$('#loginMsg').textContent='E-mail ou senha inválidos.';return;}await load();}catch(e){$('#loginMsg').textContent='Não foi possível entrar agora.';}finally{b.disabled=false;}};
+$('#enter').onclick=async()=>{const email=$('#email').value.trim(),password=$('#password').value;if(!email||!password){$('#loginMsg').textContent='Preencha e-mail e senha.';return;}const b=$('#enter');b.disabled=true;$('#loginMsg').textContent='Entrando…';
+  // Se a autenticação demorar (rede lenta ou espera de segurança do servidor após
+  // tentativas anteriores com senha errada), avisa em vez de deixar o botão preso em silêncio.
+  const slow=setTimeout(()=>{$('#loginMsg').textContent='Ainda entrando… a conexão está lenta. Aguarde alguns segundos.';},6000);
+  try{const {data,error}=await sb.auth.signInWithPassword({email,password});if(error||!data.session){$('#loginMsg').textContent=/rate|too many|seconds|429/i.test(error&&error.message||'')?'Muitas tentativas. Aguarde alguns segundos e tente novamente.':'E-mail ou senha inválidos.';return;}$('#loginMsg').textContent='Carregando seus dados…';await load();}catch(e){$('#loginMsg').textContent='Não foi possível entrar agora. Verifique sua conexão.';}finally{clearTimeout(slow);b.disabled=false;}};
 $('#password').onkeydown=e=>{if(e.key==='Enter')$('#enter').click();};
 $('#logout').onclick=async()=>{await sb.auth.signOut();location.reload();};
 $('#saveProfile').onclick=async()=>{const {error}=await sb.rpc('portal_update_profile',{p:{phone:$('#phone').value,email:$('#profileEmail').value,address:$('#address').value,bairro:$('#bairro').value}});if(error){toast('Não foi possível salvar.');return;}toast('Dados atualizados ✅');load();};
@@ -444,10 +463,27 @@ function pixRender(d){
     <p id="pixStatusLine" class="muted" style="text-align:center;margin-top:12px">⏳ Aguardando o pagamento cair…</p>
     <button class="btn ghost block" style="margin-top:6px" onclick="pixClose()">Fechar</button>`;
 }
-window.payReceivable=async id=>{
+// Barra de pagamento: soma as parcelas marcadas e habilita o botão único de PIX.
+function updatePayBar(){
+  const boxes=[...document.querySelectorAll('#overdue .rck, #upcoming .rck')];
+  const checked=boxes.filter(b=>b.checked);
+  const total=checked.reduce((s,b)=>s+(Number(b.dataset.amount)||0),0);
+  const bar=$('#payBar');if(!bar)return;
+  const btn=$('#payBtn');
+  $('#paySel').textContent=BRL(total);
+  $('#payCount').textContent=checked.length;
+  const show=boxes.length>0;
+  bar.classList.toggle('hide',!show);
+  document.body.classList.toggle('paybar-open',show);
+  btn.disabled=checked.length===0;
+  btn.textContent=checked.length?`💠 Pagar ${BRL(total)} no PIX`:'💠 Pagar no PIX';
+}
+document.addEventListener('change',e=>{if(e.target&&e.target.classList&&e.target.classList.contains('rck'))updatePayBar();});
+// Fluxo PIX genérico: serve tanto p/ uma parcela quanto p/ várias somadas.
+async function pixStart(reqBody){
   const sheet=$('#pixSheet');$('#pixModal').classList.add('show');
   sheet.innerHTML='<h3>💠 Pagamento PIX</h3><p class="muted" style="margin:10px 0">Gerando cobrança segura…</p>';
-  let res;try{res=await sb.functions.invoke('portal-pix',{body:{action:'create',receivable_id:id}});}catch(e){res={error:e};}
+  let res;try{res=await sb.functions.invoke('portal-pix',{body:reqBody});}catch(e){res={error:e};}
   const data=res.data,error=res.error;
   if(error||!data||!data.ok){
     let msg=(data&&data.error)||(error&&error.message)||'Não foi possível gerar o PIX agora.';
@@ -462,6 +498,12 @@ window.payReceivable=async id=>{
     if(st==='paid'){clearInterval(PIXPOLL);PIXPOLL=null;$('#pixSheet').innerHTML=pixPaidHtml();toast('Pagamento confirmado ✅');setTimeout(load,1400);}
     else if(st&&['cancelled','expired','error'].includes(st)){clearInterval(PIXPOLL);PIXPOLL=null;const s=$('#pixStatusLine');if(s){s.textContent='A cobrança expirou ou foi cancelada. Feche e tente de novo.';s.style.color='var(--red)';}}
   },4000);
+}
+window.payReceivable=id=>pixStart({action:'create',receivable_id:id});
+window.paySelected=async()=>{
+  const ids=[...document.querySelectorAll('#overdue .rck:checked, #upcoming .rck:checked')].map(b=>b.dataset.rid);
+  if(!ids.length){toast('Selecione ao menos uma parcela.');return;}
+  await pixStart({action:'create',receivable_ids:ids});
 };
 window.setSub=async(id,status)=>{const {error}=await sb.rpc('portal_set_subscription_status',{p_subscription:id,p_status:status});if(error){toast('Não foi possível alterar.');return;}toast(status==='paused'?'Assinatura pausada.':'Assinatura retomada ✅');load();};
 (async()=>{const {data:{session}}=await sb.auth.getSession();if(session)await load();})();
