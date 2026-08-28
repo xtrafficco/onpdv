@@ -299,6 +299,7 @@ async function onLogin(session){
   if(ME && ME.papel==='motoboy'){ showMoto(); }
   else if(ME && ME.papel==='admin'){ openBoPage('home'); startPickupPoll(); }
   else { enterPdv(); startPickupPoll(); }
+  pushRefreshIfEnabled();   // revalida a inscrição de push deste dispositivo (não bloqueia o login)
 }
 
 // ======================= NAV / BACKOFFICE =======================
@@ -409,7 +410,7 @@ function openBoPage(pg){
   if(pg==='gaveta'){ refreshCash(true); loadCashHistory(); }
   if(pg==='operacoes') loadOpsCenter();
   if(pg==='prevencao') loadLossPrevention();
-  if(pg==='config'){ renderPdvTerminalsConfig(); renderTerminals(); renderStores(); renderUsers(); loadCashbackConfigCard(); }
+  if(pg==='config'){ renderPdvTerminalsConfig(); renderTerminals(); renderStores(); renderUsers(); loadCashbackConfigCard(); renderPushCard(); }
 }
 function enterPdv(){
   currentPage='caixa';
@@ -2645,7 +2646,7 @@ function pdvErr(e){
 }
 
 /* ---------- comprovante ---------- */
-const ONPDV_CUSTOMER_PORTAL_URL='https://onpdv.netlify.app/cliente.html';
+const ONPDV_CUSTOMER_PORTAL_URL='https://onpdv.vercel.app/cliente.html';
 function pdvSaleIsAnonymous(sale){
   if(!sale)return true;
   const r=sale.res||{};
@@ -8486,6 +8487,91 @@ async function opsSendInvite(){
   const s=$('#btnOpsNewSub');if(s)s.onclick=opsSubscriptionModal;
   const q=$('#btnOpsNewQuote');if(q)q.onclick=opsQuoteModal;
   const i=$('#btnOpsInvite');if(i)i.onclick=opsInviteModal; }
+
+// ======================= NOTIFICAÇÕES (WEB PUSH) =======================
+// O backend completo já existe (VAPID + push_subscriptions + notification_outbox
+// + RPCs push_save_subscription/push_delete_subscription + dispatcher via cron a
+// cada 2 min). Aqui fica só o lado do navegador: inscrever este dispositivo e
+// manter a inscrição viva. Alertas prontos: metas de venda, crediário vencido e
+// caixa em aberto. Somente admin/operador (o RPC recusa os demais papéis).
+const PUSH_VAPID_PUBLIC='BGzjQe6BoHVZMG_bwqHnPug4EASzt0jM3ymOPusek_JH5cGaaMZXiM_Inq6AJ0FRM9heFRHi-t08cC26rd4zd30';
+function pushSupported(){ return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && typeof Notification!=='undefined'; }
+function pushB64ToUint8(base64){
+  const pad='='.repeat((4-base64.length%4)%4);
+  const raw=atob((base64+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  const out=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) out[i]=raw.charCodeAt(i);
+  return out;
+}
+async function pushGetSubscription(){
+  if(!pushSupported()) return null;
+  try{ const reg=await navigator.serviceWorker.ready; return await reg.pushManager.getSubscription(); }
+  catch(e){ return null; }
+}
+function pushSubToRpcArgs(sub){
+  const j=sub.toJSON()||{}; const keys=j.keys||{};
+  return { p_endpoint:sub.endpoint, p_p256dh:keys.p256dh||'', p_auth:keys.auth||'', p_ua:navigator.userAgent||null };
+}
+async function pushEnable(){
+  if(!pushSupported()){ toast('Este navegador não suporta notificações.',true); return; }
+  if(!(ME&&ME.is_cashier)){ toast('Apenas admin e operador recebem notificações.',true); return; }
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){ toast('Permissão de notificações negada.',true); renderPushCard(); return; }
+    const reg=await navigator.serviceWorker.ready;
+    let sub=await reg.pushManager.getSubscription();
+    if(!sub) sub=await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:pushB64ToUint8(PUSH_VAPID_PUBLIC) });
+    const { error }=await sb.rpc('push_save_subscription', pushSubToRpcArgs(sub));
+    if(error){ toast('Não foi possível ativar: '+(error.message||''),true); }
+    else toast('Notificações ativadas neste dispositivo ✓');
+  }catch(e){ logErr('push', e); toast('Não foi possível ativar as notificações.',true); }
+  renderPushCard();
+}
+async function pushDisable(){
+  try{
+    const sub=await pushGetSubscription();
+    if(sub){ await sb.rpc('push_delete_subscription',{ p_endpoint:sub.endpoint }).catch(()=>{}); await sub.unsubscribe().catch(()=>{}); }
+    toast('Notificações desativadas neste dispositivo.');
+  }catch(e){ logErr('push', e); }
+  renderPushCard();
+}
+async function pushToggle(){
+  const sub=await pushGetSubscription();
+  if(pushSupported() && Notification.permission==='granted' && sub) return pushDisable();
+  return pushEnable();
+}
+// Autocura: se já autorizado e inscrito, revalida no servidor (last_seen +
+// enabled). Se a linha tiver sido limpa, a inscrição volta sozinha no login.
+async function pushRefreshIfEnabled(){
+  try{
+    if(!pushSupported() || !(ME&&ME.is_cashier) || Notification.permission!=='granted') return;
+    const sub=await pushGetSubscription();
+    if(sub) await sb.rpc('push_save_subscription', pushSubToRpcArgs(sub)).catch(()=>{});
+  }catch(e){}
+}
+async function renderPushCard(){
+  const card=$('#cardPush'); if(!card) return;
+  const btn=$('#btnPushToggle'), lbl=$('#pushStatus');
+  if(!pushSupported()){
+    if(lbl) lbl.textContent='Este navegador não suporta notificações push.';
+    if(btn) btn.classList.add('hide');
+    return;
+  }
+  if(btn) btn.classList.remove('hide');
+  const perm=Notification.permission;
+  const sub=await pushGetSubscription();
+  const on = perm==='granted' && !!sub;
+  if(lbl) lbl.textContent = perm==='denied'
+    ? 'Notificações bloqueadas no navegador. Libere nas permissões do site para ativar.'
+    : on ? 'Ativadas neste dispositivo — você recebe metas de venda, crediário vencido e aviso de caixa em aberto.'
+         : 'Desativadas neste dispositivo.';
+  if(btn){
+    btn.textContent = on ? 'Desativar notificações' : '🔔 Ativar notificações';
+    btn.classList.toggle('ghost', on);
+    btn.disabled = perm==='denied';
+  }
+}
+window.pushEnable=pushEnable; window.pushDisable=pushDisable; window.pushToggle=pushToggle; window.renderPushCard=renderPushCard;
 
 // ======================= GO =======================
 function splitDeclarativeArgs(source){

@@ -3,7 +3,7 @@
 //  • entregador.html → app do entregador
 // Estratégia: navegação = network-first (pega a versão nova; cai no cache quando offline);
 // estáticos (ícones, lib) = cache-first. Chamadas ao Supabase NUNCA são cacheadas.
-const CACHE = 'onpdv-v38';
+const CACHE = 'onpdv-v39';
 // supabase-js fixado (mesma versão+SRI do HTML): pré-cacheado para os apps abrirem
 // offline mesmo se a CDN estiver fora do ar.
 const SUPABASE_LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8';
@@ -91,4 +91,56 @@ self.addEventListener('fetch', (e) => {
       return cached || network;
     })
   );
+});
+
+// ============ WEB PUSH (notificações mesmo com o app fechado) ============
+// O servidor (edge function push-dispatch) envia { title, body, url, tag }.
+// Aqui só exibimos e, ao clicar, focamos/abrimos a tela certa do ONPDV.
+
+// Só quatro frontends existem neste domínio. Qualquer outra URL (ex.: o
+// legado "/dashboard.html" dos enfileiradores) cai no ERP/Caixa (index.html).
+function resolveNotificationUrl(raw) {
+  try {
+    const target = new URL(raw || '', self.registration.scope);
+    const path = target.pathname.toLowerCase();
+    if (path.includes('entregador')) return './entregador.html';
+    if (path.includes('vitrine')) return './vitrine.html';
+    if (path.includes('cliente')) return './cliente.html';
+    if (path.endsWith('/index.html') || path.endsWith('/')) return './index.html';
+    return './index.html';
+  } catch (_) {
+    return './index.html';
+  }
+}
+
+self.addEventListener('push', (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; }
+  catch (_) { data = { body: (e.data && e.data.text && e.data.text()) || '' }; }
+  const title = data.title || 'ONPDV';
+  const options = {
+    body: data.body || '',
+    tag: data.tag || 'onpdv',
+    renotify: true,
+    icon: './icon-192.png',
+    badge: './icon-192.png',
+    data: { url: resolveNotificationUrl(data.url) }
+  };
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || './index.html';
+  const targetUrl = new URL(target, self.registration.scope).href;
+  e.waitUntil((async () => {
+    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of wins) {
+      // Reaproveita uma janela já aberta do mesmo app em vez de abrir outra.
+      if (c.url.startsWith(self.registration.scope) && 'focus' in c) {
+        try { await c.focus(); return; } catch (_) { /* segue para openWindow */ }
+      }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
+  })());
 });

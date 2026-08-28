@@ -919,6 +919,14 @@
 
     <!-- ---- CONFIG ---- -->
     <div id="page-config" class="page">
+      <div class="card pad u-static-15" id="cardPush">
+        <div class="head"><h2>🔔 Notificações neste dispositivo</h2><span class="grow"></span>
+          <button class="btn" id="btnPushToggle" type="button" data-onclick="pushToggle()">🔔 Ativar notificações</button></div>
+        <p class="muted" id="pushStatus" role="status" aria-live="polite">Verificando…</p>
+        <p class="muted">Ative para receber avisos automáticos mesmo com o sistema fechado:
+          <b>metas de venda</b> batidas, <b>crediário vencido</b> e <b>caixa deixado em aberto</b>.
+          A ativação vale por aparelho/navegador — repita em cada dispositivo que deve receber os alertas.</p>
+      </div>
       <div class="card pad u-static-15" id="cardUsers">
         <div class="head"><h2>👥 Operadores de caixa</h2><span class="grow"></span>
           <button class="btn" id="btnUserNew">+ Novo operador</button>
