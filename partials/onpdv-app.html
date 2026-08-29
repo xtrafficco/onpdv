@@ -193,12 +193,16 @@
             <option value="pagar">Contas a pagar</option>
             <option value="receber">Contas a receber</option>
             <option value="movestoque">Movimento de estoque</option>
+            <option value="maisvendidos">Mais vendidos do mês (curva ABC histórica)</option>
           </select>
+          <input type="month" id="ixMes" class="in u-static-9 hide" title="Mês de competência do ranking">
           <button class="btn ghost" id="btnIxModel">Baixar modelo</button>
+          <button class="btn ghost hide" id="btnIxAbcHist">📈 Curva ABC histórica</button>
           <button class="btn" id="btnIxPick">Selecionar arquivo</button>
         </div>
         <input type="file" id="ixFile" accept=".csv,.tsv,.txt,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="hide">
         <div class="pdv-note u-static-10">Aceita CSV/TSV diretamente. Arquivos Excel (.xlsx/.xls) são reconhecidos e validados quando o navegador tiver leitor compatível carregado; sem isso, salve a planilha como CSV para importar sem risco.</div>
+        <div id="ixMesNote" class="pdv-note hide" style="margin-top:6px">Selecione o <b>mês de competência</b> acima antes de importar. Cada arquivo alimenta um mês; repita mês a mês para construir o histórico da curva ABC (por quantidade e por faturamento).</div>
         <div id="ixSummary" class="stats"></div>
       </div>
       <div class="card pad">

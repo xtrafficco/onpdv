@@ -6252,7 +6252,8 @@ function ixRules(tipo){
     vendas:{required:['data','total'], numeric:['total'], importer:null},
     compras:{required:['produto','qtd','custo'], numeric:['qtd','custo'], importer:null},
     receber:{required:['cliente','valor','vencimento'], numeric:['valor'], importer:null},
-    movestoque:{required:['produto','qtd'], numeric:['qtd'], importer:null}
+    movestoque:{required:['produto','qtd'], numeric:['qtd'], importer:null},
+    maisvendidos:{required:['nome'], numeric:['qtd','faturamento','custo'], importer:'maisvendidos'}
   }[tipo]||{};
 }
 function ixModelText(tipo){
@@ -6263,16 +6264,25 @@ function ixModelText(tipo){
     vendas:'data;numero;cliente;total;forma_pagamento;loja\n2026-08-05;1001;Maria da Silva;189,90;dinheiro;Loja Centro\n',
     compras:'data;fornecedor;produto;qtd;custo;vencimento\n2026-08-05;Distribuidora XYZ;Ração Premium 15kg;10;132,50;2026-09-05\n',
     receber:'cliente;valor;vencimento;documento;telefone\nMaria da Silva;120,00;2026-08-20;12345678900;21999998888\n',
-    movestoque:'data;produto;qtd;tipo;motivo\n2026-08-05;Ração Premium 15kg;5;entrada;Ajuste de importação\n'
+    movestoque:'data;produto;qtd;tipo;motivo\n2026-08-05;Ração Premium 15kg;5;entrada;Ajuste de importação\n',
+    maisvendidos:'nome;sku;codigo_barras;qtd;faturamento;custo\nRação Premium 15kg;RC001;7891000100103;120;22788,00;15900,00\nAreia Higiênica 4kg;RC002;7891000100110;80;1592,00;960,00\n'
   };
   return samples[tipo]||samples.produtos;
 }
 function renderImportExcel(){
   const box=$('#ixSummary'); if(box&&!box.innerHTML) box.innerHTML='<div class="stat"><div class="k">Status</div><div class="v">Pronto</div><div class="muted" style="font-size:12px">aguardando arquivo</div></div>';
+  const mes=$('#ixMes'); if(mes&&!mes.value) mes.value=(mesAtualISO().ini||'').slice(0,7);
+  ixToggleTipo();
+}
+function ixToggleTipo(){
+  const isMv=($('#ixTipo')||{}).value==='maisvendidos';
+  [['#ixMes',isMv],['#ixMesNote',isMv],['#btnIxAbcHist',isMv]].forEach(([sel,on])=>{ const el=$(sel); if(el) el.classList.toggle('hide',!on); });
 }
 { const b=$('#btnIxPick'); if(b) b.onclick=()=>$('#ixFile').click();
   const m=$('#btnIxModel'); if(m) m.onclick=()=>baixarCSV('modelo-'+($('#ixTipo').value||'produtos')+'.csv', ixModelText($('#ixTipo').value||'produtos'));
   const a=$('#btnIxApply'); if(a) a.onclick=()=>ixApply();
+  const t=$('#ixTipo'); if(t) t.onchange=ixToggleTipo;
+  const h=$('#btnIxAbcHist'); if(h) h.onclick=()=>ixAbcHistModal();
   const f=$('#ixFile'); if(f) f.onchange=async e=>{ const file=e.target.files[0]; if(!file)return; await ixRead(file); e.target.value=''; }; }
 async function ixRead(file){
   const tipo=$('#ixTipo').value||'produtos';
@@ -6315,6 +6325,23 @@ async function ixApply(){
   if(!rules.importer){ toast('Este tipo foi validado, mas não será gravado automaticamente nesta fase.',true); return; }
   if(ctx.tipo==='produtos'){ window._importRows=parseCSV([ctx.parsed.headers.join(';')].concat(ctx.valid.map(r=>ctx.parsed.headers.map(h=>r[h]).join(';'))).join('\n')); return doImport(); }
   if(ctx.tipo==='clientes'){ window._custImport=parseCustCSV([ctx.parsed.headers.join(';')].concat(ctx.valid.map(r=>ctx.parsed.headers.map(h=>r[h]).join(';'))).join('\n')); return doCustImport(); }
+  if(ctx.tipo==='maisvendidos'){
+    const mes=($('#ixMes')||{}).value; if(!mes){ toast('Selecione o mês de competência antes de importar.',true); return; }
+    const rows=ctx.valid.map(r=>{ const m={}; Object.keys(r).forEach(k=>m[ixNormHeader(k)]=r[k]); return {
+      nome:String(m.nome||'').trim(),
+      sku:String(m.sku||m.codigo||'').trim(),
+      codigo_barras:String(m.codigobarras||m.codigodebarra||m.ean||'').trim(),
+      qtd:numCSV(m.qtd)||0,
+      faturamento:numCSV(m.faturamento||m.faturado||m.total)||0,
+      custo:numCSV(m.custo)||0
+    }; }).filter(r=>r.nome||r.sku||r.codigo_barras);
+    if(!rows.length){ toast('Nenhuma linha válida para importar.',true); return; }
+    const { data, error }=await sb.rpc('erp_sales_history_import',{ p_rows:rows, p_month:mes+'-01', p_store:CURRENT_STORE });
+    if(error){ toast('Erro: '+error.message,true); return; }
+    const info=data||{};
+    toast(`${info.ok||rows.length} produto(s) importados no mês ${mes} · ${info.matched||0} casados com o cadastro.`);
+    return;
+  }
   if(ctx.tipo==='pagar'){
     const rows=ctx.valid.map(r=>{ const m={}; Object.keys(r).forEach(k=>m[ixNormHeader(k)]=r[k]); return m; });
     let ok=0;
@@ -6326,6 +6353,59 @@ async function ixApply(){
     }
     toast(ok+' conta(s) a pagar importada(s).'); loadPayables();
   }
+}
+function ixAbcHistModal(){
+  const now=(mesAtualISO().ini||'').slice(0,7);
+  const [yy,mm]=now.split('-').map(Number); const di=new Date(yy,(mm||1)-1-5,1);
+  const ini6=`${di.getFullYear()}-${String(di.getMonth()+1).padStart(2,'0')}`;
+  modal(`<div class="m-head"><h3>📈 Curva ABC histórica <span class="muted" style="font-size:13px;font-weight:400">(dados importados)</span></h3><button data-modal-close>×</button></div>
+    <div class="m-body">
+      <div class="head" style="gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <label style="font-size:12px">De<br><input type="month" id="ixAbcIni" class="in" value="${ini6}"></label>
+        <label style="font-size:12px">Até<br><input type="month" id="ixAbcFim" class="in" value="${now}"></label>
+        <label style="font-size:12px">Ordenar por<br><select id="ixAbcMetric" class="in"><option value="faturamento">Faturamento</option><option value="qtd">Quantidade</option></select></label>
+        <button class="btn" id="ixAbcCalc">Calcular</button>
+      </div>
+      <div id="ixAbcBody"><p class="muted" style="padding:20px">Selecione o período e clique em Calcular.</p></div>
+    </div>`);
+  const run=()=>ixAbcHistCalc();
+  const c=$('#ixAbcCalc'); if(c) c.onclick=run;
+  ['ixAbcMetric','ixAbcIni','ixAbcFim'].forEach(id=>{ const el=$('#'+id); if(el) el.onchange=run; });
+  run();
+}
+async function ixAbcHistCalc(){
+  const iniM=($('#ixAbcIni')||{}).value, fimM=($('#ixAbcFim')||{}).value, metric=($('#ixAbcMetric')||{}).value||'faturamento';
+  if(!iniM||!fimM){ return; }
+  const body=$('#ixAbcBody'); if(body) body.innerHTML='<p class="muted" style="padding:20px">Calculando…</p>';
+  const { data, error }=await sb.rpc('erp_abc_history',{ p_ini:iniM+'-01', p_fim:fimM+'-01', p_store:CURRENT_STORE, p_metric:metric });
+  if(error){ if(body) body.innerHTML=`<p class="neg" style="padding:20px">Erro: ${esc(error.message)}</p>`; return; }
+  const rows=data||[];
+  if(!rows.length){ if(body) body.innerHTML='<p class="muted" style="padding:24px;text-align:center">Sem histórico importado para este período. Importe os mais vendidos mês a mês na Importação inteligente.</p>'; return; }
+  const isQtd=metric==='qtd';
+  const cor={A:'var(--green)',B:'var(--amber)',C:'var(--ink2)'};
+  const cls={A:0,B:0,C:0}, val={A:0,B:0,C:0};
+  rows.forEach(r=>{ cls[r.classe]++; val[r.classe]+=+(isQtd?r.qtd:r.faturamento)||0; });
+  const totFat=rows.reduce((a,r)=>a+(+r.faturamento||0),0), totQtd=rows.reduce((a,r)=>a+(+r.qtd||0),0);
+  if(body) body.innerHTML=`
+    <div class="stats" style="margin-bottom:12px">
+      ${['A','B','C'].map(k=>`<div class="stat"><div class="k" style="color:${cor[k]}">Classe ${k}</div>
+        <div class="v">${cls[k]} <span style="font-size:14px" class="muted">itens</span></div>
+        <div class="muted" style="font-size:12px">${isQtd?(val[k].toLocaleString('pt-BR')+' un'):BRL(val[k])}</div></div>`).join('')}
+      <div class="stat acc"><div class="k">Total</div><div class="v">${BRL(totFat)}</div>
+        <div class="muted" style="font-size:12px">${totQtd.toLocaleString('pt-BR')} un · ${rows.length} produtos</div></div>
+    </div>
+    <p class="muted" style="font-size:12px;margin:0 0 8px">Classificação por <b>${isQtd?'quantidade':'faturamento'}</b>. Classe A = até 80% acumulado, B = até 95%, C = restante.</p>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Produto</th><th class="r">Qtd</th><th class="r">Faturamento</th><th class="r">${isQtd?'% qtd':'% fat'}</th><th class="r">Acum.</th><th>Classe</th><th class="r">Meses</th></tr></thead>
+      <tbody>${rows.map(r=>`<tr>
+        <td>${esc(r.nome)}${r.product_id?'':' <span class="chip warn" style="font-size:10px">sem cadastro</span>'}</td>
+        <td class="r">${(+r.qtd||0).toLocaleString('pt-BR')}</td>
+        <td class="r"><b>${BRL(r.faturamento)}</b></td>
+        <td class="r">${(+r.pct||0).toFixed(1)}%</td>
+        <td class="r muted">${(+r.pct_acum||0).toFixed(1)}%</td>
+        <td><span class="chip" style="background:${cor[r.classe]};color:#fff">${r.classe}</span></td>
+        <td class="r muted">${+r.meses||0}</td>
+      </tr>`).join('')}</tbody></table></div>`;
 }
 async function renderFinanceiroInt(){
   const box=$('#fiStats'); if(box) box.innerHTML='<p class="muted" style="padding:10px 0">Calculando...</p>';
