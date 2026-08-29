@@ -74,6 +74,7 @@
             <button data-page="cmpLista">📝 Lista</button>
             <button data-page="cmpListaIconha" data-parent="cmpLista" class="bo-sub">Lista Iconha</button>
             <button data-page="cmpListaReta" data-parent="cmpLista" class="bo-sub">Lista Reta</button>
+            <button data-page="cmpCatalogo">📦 Catálogo</button>
             <button data-page="cmpPedido">🧾 Montar pedido</button>
             <button data-page="cmpAprovacao">✅ Aprovação</button>
             <button data-page="cmpRecebimento">📦 Recebimento</button>
@@ -1079,6 +1080,9 @@
     <div id="page-cmpListaIconha" class="page"><div id="cmpListaIconhaHost" data-list="iconha"></div></div>
     <div id="page-cmpListaReta" class="page"><div id="cmpListaRetaHost" data-list="reta"></div></div>
 
+    <!-- Compras · Catálogo (separado da Lista) -->
+    <div id="page-cmpCatalogo" class="page"><div id="cmpCatalogoHost"></div></div>
+
     <!-- Compras · Montar pedido -->
     <div id="page-cmpPedido" class="page">
       <div class="card pad">
@@ -1101,7 +1105,10 @@
           <div class="stat"><div class="k">Valor por boleto</div><div class="v" id="cmpPoInstStat">R$ 0,00</div></div>
         </div>
         <div id="cmpPoSchedule"></div>
-        <button class="btn green" id="cmpPoSend" data-onclick="cmpPedidoSend()" style="margin-top:12px">Enviar para aprovação</button>
+        <div class="cmp-po-actions">
+          <button class="btn green" id="cmpPoSend" data-onclick="cmpPedidoSend()">Enviar para aprovação</button>
+          <button class="btn ghost red" id="cmpPoCancel" data-onclick="cmpPedidoCancel()">Cancelar pedido</button>
+        </div>
       </div>
       <div class="card pad">
         <div class="head"><h2>Itens da lista</h2><span class="grow"></span><button class="btn ghost sm" data-onclick="cmpPedidoSelectAll()">Selecionar todos</button></div>

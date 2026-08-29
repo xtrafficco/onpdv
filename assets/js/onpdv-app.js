@@ -24,6 +24,9 @@ const num = v => { let s=String(v??'').trim().replace(/\s|R\$/gi,'').replace(/[^
 const fmtNum = n => (Number(n)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 let ME = null, PRODUCTS = [], CUSTOMERS = [], TERMINALS = [], COMPANY = {}, STORES = [], SUPPLIERS = [];
 let CURRENT_STORE = null, TR_CART = [], MATRIZ_STOCK = {}, FRETE_RULES = [];
+// Listas de Compras (Iconha/Reta) que alimentaram o carrinho de transferência atual.
+// Ao gerar a transferência, essas listas são esvaziadas.
+let TR_SOURCE_LISTS = [];
 let CB_ACTIVE = false;   // programa de cashback ligado? (controla o resgate no checkout)
 async function loadCashbackActive(){ try{ const { data } = await sb.rpc('cashback_config_get'); CB_ACTIVE = !!(data && data.ativo); }catch(e){ CB_ACTIVE=false; } }
 let POS_CHAN = null;
@@ -309,7 +312,7 @@ const PAGE_TITLES={ home:'Início', decisao:'Central de Decisão', importexcel:'
   estoquecrm:'CRM inteligente · Estoque', validade:'Validade de lotes', inventario:'Inventário rotativo', nfimport:'NF-e importadas', encalhados:'Produtos encalhados', pedidoint:'Pedido inteligente', crediario:'Contas a receber',
   crediariocrm:'CRM inteligente · Contas a receber', pagar:'Contas a pagar', pagarcrm:'CRM inteligente · Contas a pagar', transfer:'Transferências', gaveta:'Caixa',
   relatorio:'Relatório', concilmp:'Conciliação Mercado Pago', auditoria:'Auditoria', nps:'NPS · Satisfação', churn:'Clientes em risco', precos:'Preços por margem-alvo', promocoes:'Promoções', operacoes:'Operações 360', prevencao:'Prevenção de perdas', config:'Configurações',
-  cmpPainel:'Compras · Painel', cmpLista:'Compras · Lista', cmpListaIconha:'Compras · Lista Iconha', cmpListaReta:'Compras · Lista Reta', cmpPedido:'Compras · Montar pedido', cmpAprovacao:'Compras · Aprovação', cmpRecebimento:'Compras · Recebimento', cmpConcluido:'Compras · Pedidos concluídos', cmpFinanceiro:'Compras · Financeiro', cmpFornecedores:'Compras · Fornecedores', cmpCotacoes:'Compras · Cotações', cmpHistorico:'Compras · Histórico de preço', cmpAlertas:'Compras · Alertas', cmpAuditoria:'Compras · Auditoria' };
+  cmpPainel:'Compras · Painel', cmpLista:'Compras · Lista', cmpListaIconha:'Compras · Lista Iconha', cmpListaReta:'Compras · Lista Reta', cmpCatalogo:'Compras · Catálogo', cmpPedido:'Compras · Montar pedido', cmpAprovacao:'Compras · Aprovação', cmpRecebimento:'Compras · Recebimento', cmpConcluido:'Compras · Pedidos concluídos', cmpFinanceiro:'Compras · Financeiro', cmpFornecedores:'Compras · Fornecedores', cmpCotacoes:'Compras · Cotações', cmpHistorico:'Compras · Histórico de preço', cmpAlertas:'Compras · Alertas', cmpAuditoria:'Compras · Auditoria' };
 const BO_PAGE_BUTTONS='.bo-nav [data-page]';
 $$(BO_PAGE_BUTTONS).forEach(b=> b.addEventListener('click',()=>openBoPage(b.dataset.page)));
 function setBoMenu(open){document.body.classList.toggle('bo-menu-open',!!open);const b=$('#boMenuToggle');if(b)b.setAttribute('aria-expanded',String(!!open));}
@@ -345,7 +348,7 @@ function myPerms(){
 }
 function can(k){ return isAdmin() ? true : !!myPerms()[k]; }
 const SUBPAGE_PARENT={ estoquecrm:'estoque', validade:'estoque', inventario:'estoque', nfimport:'estoque', encalhados:'estoque', crediariocrm:'crediario', pagarcrm:'pagar',
-  cmpPainel:'compras', cmpLista:'compras', cmpListaIconha:'compras', cmpListaReta:'compras', cmpPedido:'compras', cmpAprovacao:'compras', cmpRecebimento:'compras', cmpConcluido:'compras', cmpFinanceiro:'compras', cmpFornecedores:'compras', cmpCotacoes:'compras', cmpHistorico:'compras', cmpAlertas:'compras', cmpAuditoria:'compras' };
+  cmpPainel:'compras', cmpLista:'compras', cmpListaIconha:'compras', cmpListaReta:'compras', cmpCatalogo:'compras', cmpPedido:'compras', cmpAprovacao:'compras', cmpRecebimento:'compras', cmpConcluido:'compras', cmpFinanceiro:'compras', cmpFornecedores:'compras', cmpCotacoes:'compras', cmpHistorico:'compras', cmpAlertas:'compras', cmpAuditoria:'compras' };
 function canPage(pg){ const base=SUBPAGE_PARENT[pg]||pg; return base==='caixa' ? isCashier() : can('page_'+base); }
 window.can=can; window.canPage=canPage;
 function isAdmin(){ return !!(ME && ME.papel==='admin'); }
@@ -7959,7 +7962,7 @@ function renderTrCart(){
 }
 window.trQty=(i,d)=>{ TR_CART[i].qtd=Math.max(1,TR_CART[i].qtd+d); renderTrCart(); };
 window.trSetQty=(i,v)=>{ TR_CART[i].qtd=Math.max(1,parseFloat(v)||1); renderTrCart(); };
-window.trRm=i=>{ TR_CART.splice(i,1); renderTrCart(); };
+window.trRm=i=>{ TR_CART.splice(i,1); if(!TR_CART.length) TR_SOURCE_LISTS=[]; renderTrCart(); };
 $('#btnTrCreate').onclick = async ()=>{
   if(!TR_CART.length){ toast('Adicione produtos.',true); return; }
   const dest=$('#trDest').value; if(!dest){ toast('Selecione a loja de destino.',true); return; }
@@ -7967,6 +7970,9 @@ $('#btnTrCreate').onclick = async ()=>{
   const { data, error } = await sb.rpc('erp_transfer_create',{ p_destino:dest, p_items:items, p_obs:null });
   if(error){ toast('Erro: '+error.message,true); return; }
   toast('Pedido de transferência #'+data.numero+' criado (rascunho)');
+  // esvazia as listas de Compras (Iconha/Reta) que alimentaram esta transferência
+  if(typeof window.cmpClearList === 'function') TR_SOURCE_LISTS.forEach(l => window.cmpClearList(l));
+  TR_SOURCE_LISTS = [];
   TR_CART=[]; renderTrCart(); loadTransfers();
 };
 { const b=$('#btnTrFilter'); if(b) b.onclick=()=>loadTransfers();
@@ -8651,7 +8657,7 @@ initAuth();
    purchase_compras_module aplicadas no Supabase.
    ====================================================================== */
 (() => {
-  const CMP = { sales:null, salesAt:0, order:null, drafts:[], po:[] };
+  const CMP = { sales:null, salesAt:0, order:null, drafts:[], po:[], catList:'geral' };
   const cmpProd = pid => (PRODUCTS||[]).find(p => String(p.id) === String(pid));
   const cmpProdCode = p => p ? (p.sku || p.codigo_barras || '—') : '—';
   const cmpListKey = label => 'onpdv_cmp_list_' + (CURRENT_STORE || 'x') + '_' + label;
@@ -8687,6 +8693,12 @@ initAuth();
     const { trends, abcMap } = await cmpEnsureSales();
     const map = cmpListGet(label);
     const ids = Object.keys(map);
+    // Iconha e Reta são filiais: os itens viram uma transferência (Modelo → filial),
+    // não uma compra de fornecedor. A montagem final acontece na aba Transferências.
+    const isTransfer = (label === 'iconha' || label === 'reta');
+    const primaryBtn = isTransfer
+      ? `<button class="btn" data-onclick="cmpListToTransfer('${label}')">🔄 Montar transferência</button>`
+      : `<button class="btn" data-onclick="cmpListToOrder('${label}')">Montar pedido</button>`;
     const listRows = ids.map(pid => {
       const p = cmpProd(pid); if(!p) return '';
       const dia = cmpDaily(trends, pid);
@@ -8700,6 +8712,30 @@ initAuth();
         <td class="r"><button class="btn ghost sm red" data-onclick="cmpListRemove('${label}','${pid}')">Remover</button></td>
       </tr>`;
     }).join('');
+    host.innerHTML = `
+      <div class="stats">
+        <div class="stat"><div class="k">Itens na lista</div><div class="v" id="cmpListCount_${label}">${ids.length}</div></div>
+        <div class="stat"><div class="k">Sugestão total (30 dias)</div><div class="v">${ids.reduce((a,pid)=>a+Math.max(1,Math.round(cmpDaily(trends,pid)*30)),0).toLocaleString('pt-BR')}</div></div>
+      </div>
+      <div class="card pad">
+        <div class="head"><h2>📝 ${esc(cmpListLabelName(label))}</h2><span class="grow"></span>
+          <button class="btn ghost" data-onclick="cmpGoCatalogo('${label}')">📦 Catálogo</button>
+          ${primaryBtn}</div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Código</th><th>Produto</th><th class="r">Quantidade</th><th class="c">Tendência</th><th class="r">Média móvel</th><th>ABC</th><th></th></tr></thead>
+          <tbody>${listRows || '<tr><td colspan="7" class="muted" style="text-align:center;padding:18px">Nenhum produto na lista. Adicione itens pelo Catálogo.</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  }
+
+  // =================== CATÁLOGO (separado da Lista) ===================
+  async function cmpRenderCatalogo(){
+    const host = $('#cmpCatalogoHost');
+    if(!host) return;
+    host.innerHTML = '<div class="card pad"><p class="muted">Carregando catálogo e vendas…</p></div>';
+    const { trends } = await cmpEnsureSales();
+    const label = CMP.catList || 'geral';
+    const map = cmpListGet(label);
     const catRows = (PRODUCTS||[]).slice(0, 400).map(p => {
       const dia = cmpDaily(trends, p.id);
       const sug = Math.max(1, Math.round(dia*30));
@@ -8708,32 +8744,27 @@ initAuth();
         <td class="r">${p.track_stock?(Number(p.estoque)||0).toLocaleString('pt-BR'):'—'}</td>
         <td class="r muted">${BRL(p.custo)}</td>
         <td class="r">${fmtNum(dia)}<span class="muted" style="font-size:11px">/dia</span></td>
-        <td class="r"><button class="btn ghost sm" data-onclick="cmpListAdd('${label}','${p.id}', ${sug})">${map[p.id]!=null?'✓ na lista':'+ adicionar'}</button></td>
+        <td class="r"><button class="btn ghost sm" data-onclick="cmpCatAdd('${p.id}', ${sug})">${map[p.id]!=null?'✓ na lista':'+ adicionar'}</button></td>
       </tr>`;
     }).join('');
+    const listOpts = ['geral','iconha','reta'].map(v =>
+      `<option value="${v}" ${v===label?'selected':''}>${esc(cmpListLabelName(v))}</option>`).join('');
     host.innerHTML = `
-      <div class="stats">
-        <div class="stat"><div class="k">Itens na lista</div><div class="v" id="cmpListCount_${label}">${ids.length}</div></div>
-        <div class="stat"><div class="k">Sugestão total (30 dias)</div><div class="v">${ids.reduce((a,pid)=>a+Math.max(1,Math.round(cmpDaily(trends,pid)*30)),0).toLocaleString('pt-BR')}</div></div>
-      </div>
       <div class="card pad">
-        <div class="head"><h2>📝 ${esc(cmpListLabelName(label))}</h2><span class="grow"></span>
-          <button class="btn" data-onclick="cmpListToOrder('${label}')">Montar pedido</button></div>
-        <div class="tbl-wrap"><table>
-          <thead><tr><th>Código</th><th>Produto</th><th class="r">Quantidade</th><th class="c">Tendência</th><th class="r">Média móvel</th><th>ABC</th><th></th></tr></thead>
-          <tbody>${listRows || '<tr><td colspan="7" class="muted" style="text-align:center;padding:18px">Nenhum produto na lista. Adicione do catálogo abaixo.</td></tr>'}</tbody>
-        </table></div>
-      </div>
-      <div class="card pad u-static-3">
         <div class="head"><h2>📦 Catálogo do onpdv</h2><span class="grow"></span>
-          <input class="in" style="max-width:280px" placeholder="Buscar produto…" data-oninput="cmpCatFilter('${label}', this.value)"></div>
+          <label class="lbl" style="margin:0 8px 0 0;align-self:center">Adicionar em</label>
+          <select class="in" style="max-width:180px" data-onchange="cmpCatListChange(this.value)">${listOpts}</select>
+          <input class="in" style="max-width:260px" placeholder="Buscar produto…" data-oninput="cmpCatFilter('cat', this.value)"></div>
         <div class="tbl-wrap"><table>
           <thead><tr><th>Produto</th><th class="r">Estoque</th><th class="r">Custo</th><th class="r">Média móvel</th><th></th></tr></thead>
-          <tbody id="cmpCatBody_${label}">${catRows}</tbody>
+          <tbody id="cmpCatBody_cat">${catRows}</tbody>
         </table></div>
-        <p class="muted" style="font-size:12px;padding:10px 4px 0">Mostrando os primeiros produtos do catálogo. Use a busca para encontrar itens específicos. Média móvel e tendência vêm das vendas do onpdv.</p>
+        <p class="muted" style="font-size:12px;padding:10px 4px 0">Mostrando os primeiros produtos do catálogo. Use a busca para encontrar itens específicos. Os itens são adicionados na lista selecionada acima. Média móvel e tendência vêm das vendas do onpdv.</p>
       </div>`;
   }
+  window.cmpGoCatalogo = label => { CMP.catList = label || 'geral'; openBoPage('cmpCatalogo'); };
+  window.cmpCatListChange = v => { CMP.catList = v || 'geral'; cmpRenderCatalogo(); };
+  window.cmpCatAdd = (pid, sug) => { const label = CMP.catList || 'geral'; const m = cmpListGet(label); m[pid] = num(m[pid]) || sug || 1; cmpListSet(label, m); cmpRenderCatalogo(); };
   window.cmpCatFilter = (label, q) => {
     const nq = normTxt(q||''); const body = $('#cmpCatBody_' + label); if(!body) return;
     body.querySelectorAll('tr').forEach(tr => { tr.style.display = (!nq || (tr.dataset.cmpname||'').includes(nq)) ? '' : 'none'; });
@@ -8742,6 +8773,26 @@ initAuth();
   window.cmpListRemove = (label, pid) => { const m = cmpListGet(label); delete m[pid]; cmpListSet(label, m); cmpRenderLista(label); };
   window.cmpListQty = (label, pid, val) => { const m = cmpListGet(label); const q = num(val); if(q>0) m[pid] = q; else delete m[pid]; cmpListSet(label, m); const c = $('#cmpListCount_'+label); if(c) c.textContent = Object.keys(m).length; };
   window.cmpListToOrder = label => { const sel = $('#cmpPoList'); if(sel) sel.value = label; openBoPage('cmpPedido'); };
+
+  // Iconha/Reta → aba Transferências: carrega os itens da lista no carrinho de
+  // transferência (Modelo → filial) e usa a mesma lógica já existente para montar/gerar.
+  window.cmpListToTransfer = label => {
+    const map = cmpListGet(label);
+    const items = Object.keys(map).map(pid => {
+      const p = cmpProd(pid); if(!p) return null;
+      return { product_id:String(pid), nome:p.nome||String(pid), qtd:Math.max(1, num(map[pid])||1), custo:Number(p.custo)||0 };
+    }).filter(Boolean);
+    if(!items.length){ toast('A lista está vazia — adicione itens pelo Catálogo.', true); return; }
+    // mescla no carrinho: soma a quantidade de itens já presentes, acrescenta os novos
+    items.forEach(it => { const ex = TR_CART.find(x => String(x.product_id) === it.product_id); if(ex) ex.qtd += it.qtd; else TR_CART.push(it); });
+    if(!TR_SOURCE_LISTS.includes(label)) TR_SOURCE_LISTS.push(label);   // origem p/ esvaziar ao gerar
+    openBoPage('transfer');                            // dispara loadTransfers()/renderTrCart()
+    const store = (STORES||[]).find(s => !s.is_matriz && normTxt(s.nome||'').includes(label));
+    const dest = $('#trDest'); if(dest && store) dest.value = store.id;   // pré-seleciona a filial pelo nome
+    toast('Itens da ' + cmpListLabelName(label) + ' adicionados à transferência');
+  };
+  // permite ao fluxo de transferências (código global) esvaziar uma lista de Compras
+  window.cmpClearList = label => { cmpListSet(label, {}); if(typeof currentPage === 'string' && currentPage.startsWith('cmpLista')) cmpRenderLista(label); };
 
   // =================== MONTAR PEDIDO ===================
   function cmpRenderPedido(){
@@ -8803,6 +8854,17 @@ initAuth();
   ['cmpPoInstallments','cmpPoInterval','cmpPoDelivery'].forEach(id => { document.addEventListener('input', e => { if(e.target && e.target.id===id) cmpUpdateOrderTotals(); }); });
   document.addEventListener('change', e => { if(e.target && e.target.id==='cmpPoList') cmpBuildOrderFromList(); });
 
+  window.cmpPedidoCancel = async () => {
+    const has = Object.keys(CMP.order||{}).length;
+    if(has && !await uiConfirm('Cancelar o pedido em montagem? Os itens selecionados serão descartados (a lista de origem não é alterada).', { danger:true, okText:'Cancelar pedido', cancelText:'Voltar' })) return;
+    CMP.order = {};
+    ['cmpPoSup','cmpPoNotes','cmpPoDelivery'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
+    const inst=$('#cmpPoInstallments'); if(inst) inst.value='1';
+    const intv=$('#cmpPoInterval'); if(intv) intv.value='30';
+    const pr=$('#cmpPoPriority'); if(pr) pr.value = (PURCHASE_FLOW && PURCHASE_FLOW.config && PURCHASE_FLOW.config.default_priority) || 'normal';
+    cmpRenderOrderSelection();
+    toast('Pedido cancelado');
+  };
   window.cmpPedidoSend = async () => {
     const items = cmpSelectedItems();
     if(!items.length){ toast('Selecione ao menos um item com quantidade.', true); return; }
@@ -9106,6 +9168,7 @@ initAuth();
     cmpLista: () => cmpRenderLista('geral'),
     cmpListaIconha: () => cmpRenderLista('iconha'),
     cmpListaReta: () => cmpRenderLista('reta'),
+    cmpCatalogo: cmpRenderCatalogo,
     cmpPedido: cmpRenderPedido,
     cmpAprovacao: cmpRenderAprovacao,
     cmpRecebimento: cmpRenderRecebimento,
