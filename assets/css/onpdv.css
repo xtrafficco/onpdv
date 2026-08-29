@@ -715,3 +715,7 @@ body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filte
 .u-static-60{font-size:12.5px;margin-top:4px}
 .u-static-61{font-size:13px;opacity:.85}
 .u-static-62{color:var(--ink2)}
+
+/* Módulo Compras: usa apenas os componentes nativos do onpdv (.stats/.stat, .chip,
+   .sum, .grid2, .field, tabelas). Nenhuma classe própria é necessária. */
+#page-cmpPedido>.card+.card,#page-cmpCotacoes>.card+.card,#page-cmpHistorico>.card+.card{margin-top:16px}

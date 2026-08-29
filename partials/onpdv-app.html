@@ -67,6 +67,25 @@
             <button data-page="precos">🏷️ Preços por margem</button>
           </div>
         </section>
+        <section class="bo-nav-group" data-nav-group="compras">
+          <button class="bo-group-toggle" type="button" aria-expanded="false"><span>Compras</span><span aria-hidden="true">⌄</span></button>
+          <div class="bo-group-items">
+            <button data-page="cmpPainel">🛒 Painel de compras</button>
+            <button data-page="cmpLista">📝 Lista</button>
+            <button data-page="cmpListaIconha" data-parent="cmpLista" class="bo-sub">Lista Iconha</button>
+            <button data-page="cmpListaReta" data-parent="cmpLista" class="bo-sub">Lista Reta</button>
+            <button data-page="cmpPedido">🧾 Montar pedido</button>
+            <button data-page="cmpAprovacao">✅ Aprovação</button>
+            <button data-page="cmpRecebimento">📦 Recebimento</button>
+            <button data-page="cmpConcluido">🎯 Pedidos concluídos</button>
+            <button data-page="cmpFinanceiro">💳 Financeiro (boletos)</button>
+            <button data-page="cmpFornecedores">🏭 Fornecedores</button>
+            <button data-page="cmpCotacoes">💬 Cotações</button>
+            <button data-page="cmpHistorico">📈 Histórico de preço</button>
+            <button data-page="cmpAlertas">🚨 Alertas</button>
+            <button data-page="cmpAuditoria">🔎 Auditoria de compras</button>
+          </div>
+        </section>
         <section class="bo-nav-group" data-nav-group="configuracoes">
           <button class="bo-group-toggle" type="button" aria-expanded="false"><span>Configurações</span><span aria-hidden="true">⌄</span></button>
           <div class="bo-group-items"><button data-page="config">⚙️ Configurações</button></div>
@@ -1039,6 +1058,153 @@
         <div class="tbl-wrap"><table>
           <thead><tr><th>Bairro</th><th class="r">Frete</th><th></th></tr></thead>
           <tbody id="freteBody"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- ==================== COMPRAS (fusão COMPRAS247) ==================== -->
+
+    <!-- Compras · Painel -->
+    <div id="page-cmpPainel" class="page">
+      <div class="stats" id="cmpDashStats"></div>
+      <div class="erp-cols">
+        <div class="card pad"><div class="head"><h2>🏭 Compras por fornecedor (mês)</h2></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Fornecedor</th><th class="r">Total</th></tr></thead><tbody id="cmpDashSuppliers"></tbody></table></div></div>
+        <div class="card pad"><div class="head"><h2>📈 Curva ABC · mais vendidos</h2><span class="grow"></span><span class="muted" id="cmpDashAbcScope"></span></div>
+          <div class="tbl-wrap"><table><thead><tr><th>Produto</th><th>Classe</th><th class="r">Faturamento</th></tr></thead><tbody id="cmpDashAbc"></tbody></table></div></div>
+      </div>
+    </div>
+
+    <!-- Compras · Lista (geral / iconha / reta usam a mesma tela) -->
+    <div id="page-cmpLista" class="page"><div id="cmpListaHost" data-list="geral"></div></div>
+    <div id="page-cmpListaIconha" class="page"><div id="cmpListaIconhaHost" data-list="iconha"></div></div>
+    <div id="page-cmpListaReta" class="page"><div id="cmpListaRetaHost" data-list="reta"></div></div>
+
+    <!-- Compras · Montar pedido -->
+    <div id="page-cmpPedido" class="page">
+      <div class="card pad">
+        <div class="head"><h2>🧾 Dados do pedido</h2></div>
+        <div class="grid2">
+          <div class="field"><label class="lbl">Origem</label>
+            <select id="cmpPoList" class="in"><option value="geral">Lista geral</option><option value="iconha">Lista Iconha</option><option value="reta">Lista Reta</option></select></div>
+          <div class="field"><label class="lbl">Fornecedor</label><select id="cmpPoSup" class="in"><option value="">Selecione</option></select></div>
+          <div class="field"><label class="lbl">Loja</label><select id="cmpPoStore" class="in"></select></div>
+          <div class="field"><label class="lbl">Solicitante</label><input id="cmpPoBuyer" class="in"></div>
+          <div class="field"><label class="lbl">Prioridade</label><select id="cmpPoPriority" class="in"><option value="baixa">Baixa</option><option value="normal" selected>Normal</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></div>
+          <div class="field"><label class="lbl">Entrega desejada</label><input id="cmpPoDelivery" class="in" type="date"></div>
+          <div class="field"><label class="lbl">Quantidade de boletos</label><input id="cmpPoInstallments" class="in" type="number" min="1" value="1"></div>
+          <div class="field"><label class="lbl">Intervalo dos boletos (dias)</label><input id="cmpPoInterval" class="in" type="number" min="1" value="30"></div>
+        </div>
+        <div class="field" style="margin-top:12px"><label class="lbl">Observações</label><textarea id="cmpPoNotes" class="in" rows="2"></textarea></div>
+        <div class="stats" style="margin-top:14px">
+          <div class="stat"><div class="k">Itens selecionados</div><div class="v" id="cmpPoItemsStat">0</div></div>
+          <div class="stat"><div class="k">Total do pedido</div><div class="v" id="cmpPoTotalStat">R$ 0,00</div></div>
+          <div class="stat"><div class="k">Valor por boleto</div><div class="v" id="cmpPoInstStat">R$ 0,00</div></div>
+        </div>
+        <div id="cmpPoSchedule"></div>
+        <button class="btn green" id="cmpPoSend" data-onclick="cmpPedidoSend()" style="margin-top:12px">Enviar para aprovação</button>
+      </div>
+      <div class="card pad">
+        <div class="head"><h2>Itens da lista</h2><span class="grow"></span><button class="btn ghost sm" data-onclick="cmpPedidoSelectAll()">Selecionar todos</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th class="c">✓</th><th>Produto</th><th class="r">Qtd</th><th class="r">Custo</th><th class="r">Subtotal</th></tr></thead><tbody id="cmpPoSelection"></tbody></table></div>
+        <div class="empty" id="cmpPoEmpty">Escolha itens numa Lista para montar o pedido.</div>
+      </div>
+    </div>
+
+    <!-- Compras · Aprovação -->
+    <div id="page-cmpAprovacao" class="page">
+      <div class="card pad"><div class="head"><h2>✅ Pedidos aguardando aprovação</h2><span class="grow"></span><button class="btn ghost sm" data-onclick="cmpRenderAprovacao()">Atualizar</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Origem</th><th>Fornecedor</th><th>Solicitante</th><th class="r">Total</th><th>Prioridade</th><th></th></tr></thead><tbody id="cmpAprovacaoBody"></tbody></table></div>
+        <div class="empty" id="cmpAprovacaoEmpty">Nenhum pedido aguardando aprovação.</div>
+      </div>
+    </div>
+
+    <!-- Compras · Recebimento -->
+    <div id="page-cmpRecebimento" class="page">
+      <div class="card pad"><div class="head"><h2>📦 Pedidos aprovados aguardando recebimento</h2><span class="grow"></span><button class="btn ghost sm" data-onclick="cmpRenderRecebimento()">Atualizar</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Fornecedor</th><th>Loja</th><th class="r">Previsto</th><th class="r">Recebido</th><th>Status</th><th></th></tr></thead><tbody id="cmpRecebimentoBody"></tbody></table></div>
+        <div class="empty" id="cmpRecebimentoEmpty">Nenhum pedido aguardando recebimento.</div>
+      </div>
+    </div>
+
+    <!-- Compras · Pedidos concluídos -->
+    <div id="page-cmpConcluido" class="page">
+      <div class="card pad"><div class="head"><h2>🎯 Pedidos concluídos (recebidos)</h2><span class="grow"></span><button class="btn ghost sm" data-onclick="cmpRenderConcluido()">Atualizar</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Fornecedor</th><th>Loja</th><th class="r">Recebido</th><th>Recebido em</th><th></th></tr></thead><tbody id="cmpConcluidoBody"></tbody></table></div>
+        <div class="empty" id="cmpConcluidoEmpty">Nenhum pedido concluído.</div>
+      </div>
+    </div>
+
+    <!-- Compras · Financeiro -->
+    <div id="page-cmpFinanceiro" class="page">
+      <div class="stats">
+        <div class="stat acc"><div class="k">Total em aberto</div><div class="v" id="cmpFinTotal">R$ 0,00</div></div>
+        <div class="stat"><div class="k">Contas em aberto</div><div class="v" id="cmpFinCount">0</div></div>
+        <div class="stat warn"><div class="k">Vencido</div><div class="v" id="cmpFinVenc">R$ 0,00</div></div>
+        <div class="stat"><div class="k">Próximo vencimento</div><div class="v" id="cmpFinNext">—</div></div>
+      </div>
+      <div class="card pad"><div class="head"><h2>💳 Boletos / contas a pagar de compras</h2><span class="grow"></span>
+        <select id="cmpFinStore" class="in" style="max-width:220px"><option value="">Todas as lojas</option></select>
+        <button class="btn ghost sm" data-onclick="cmpRenderFinanceiro()">Atualizar</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Vencimento</th><th>Fornecedor</th><th>Loja</th><th>Categoria</th><th class="r">Valor</th><th>Status</th></tr></thead><tbody id="cmpFinBody"></tbody></table></div>
+        <div class="empty" id="cmpFinEmpty">Nenhuma conta a pagar de compras.</div>
+      </div>
+    </div>
+
+    <!-- Compras · Fornecedores -->
+    <div id="page-cmpFornecedores" class="page">
+      <div class="card pad"><div class="head"><h2>🏭 Fornecedores</h2><span class="grow"></span><button class="btn" data-onclick="cmpSupplierForm()">+ Novo fornecedor</button><button class="btn ghost" data-onclick="cmpRenderFornecedores()">↻ Atualizar</button></div>
+        <p class="muted u-static-55">Os fornecedores são os mesmos de Contas a pagar e do Pedido inteligente.</p>
+        <div class="tbl-wrap"><table><thead><tr><th>Fornecedor</th><th>CNPJ</th><th>Telefone</th><th>E-mail</th><th class="r">Prazo (dias)</th><th></th></tr></thead><tbody id="cmpFornecBody"></tbody></table></div>
+        <div class="empty" id="cmpFornecEmpty">Nenhum fornecedor cadastrado.</div>
+      </div>
+    </div>
+
+    <!-- Compras · Cotações -->
+    <div id="page-cmpCotacoes" class="page">
+      <div class="card pad"><div class="head"><h2>💬 Registrar cotação</h2></div>
+        <div class="grid2">
+          <div class="field"><label class="lbl">Produto</label><select id="cmpQuoteProduct" class="in"></select></div>
+          <div class="field"><label class="lbl">Fornecedor</label><select id="cmpQuoteSupplier" class="in"></select></div>
+          <div class="field"><label class="lbl">Preço cotado</label><input id="cmpQuotePrice" class="in" inputmode="decimal" placeholder="0,00"></div>
+          <div class="field"><label class="lbl">Prazo (dias)</label><input id="cmpQuoteDays" class="in" type="number" min="0" value="0"></div>
+        </div>
+        <div class="field" style="margin-top:12px"><label class="lbl">Observações</label><input id="cmpQuoteNotes" class="in"></div>
+        <button class="btn green" data-onclick="cmpQuoteSave()" style="margin-top:12px">Salvar cotação</button>
+      </div>
+      <div class="card pad"><div class="head"><h2>Comparativo de preços</h2><span class="grow"></span><button class="btn ghost sm" data-onclick="cmpRenderCotacoes()">Atualizar</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Produto</th><th>Fornecedor</th><th class="r">Preço</th><th class="r">Prazo</th><th>Melhor</th></tr></thead><tbody id="cmpCotacoesBody"></tbody></table></div>
+        <div class="empty" id="cmpCotacoesEmpty">Nenhuma cotação registrada.</div>
+      </div>
+    </div>
+
+    <!-- Compras · Histórico de preço -->
+    <div id="page-cmpHistorico" class="page">
+      <div class="card pad"><div class="head"><h2>📈 Histórico de preço de compra</h2><span class="grow"></span>
+        <select id="cmpHistProduct" class="in" style="max-width:420px"></select></div>
+        <div class="stats">
+          <div class="stat"><div class="k">Custo atual</div><div class="v" id="cmpHistCurrent">—</div></div>
+          <div class="stat"><div class="k">Última variação</div><div class="v" id="cmpHistVar">—</div></div>
+          <div class="stat"><div class="k">Menor registrado</div><div class="v" id="cmpHistMin">—</div></div>
+          <div class="stat"><div class="k">Maior registrado</div><div class="v" id="cmpHistMax">—</div></div>
+        </div>
+        <div class="tbl-wrap"><table><thead><tr><th>Data</th><th>Fornecedor</th><th class="r">Preço</th><th class="r">Variação</th><th>Origem</th></tr></thead><tbody id="cmpHistBody"></tbody></table></div>
+        <div class="empty" id="cmpHistEmpty">Sem histórico de preço para este produto.</div>
+      </div>
+    </div>
+
+    <!-- Compras · Alertas -->
+    <div id="page-cmpAlertas" class="page">
+      <div class="card pad"><div class="head"><h2>🚨 Alertas de compras</h2><span class="grow"></span><button class="btn ghost sm" data-onclick="cmpRenderAlertas()">Atualizar</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Alerta</th><th>Detalhe</th><th></th></tr></thead><tbody id="cmpAlertasBody"></tbody></table></div>
+        <div class="empty" id="cmpAlertasEmpty">Nenhum alerta no momento.</div>
+      </div>
+    </div>
+
+    <!-- Compras · Auditoria -->
+    <div id="page-cmpAuditoria" class="page">
+      <div class="card pad"><div class="head"><h2>🔎 Auditoria do fluxo de compras</h2><span class="grow"></span><button class="btn ghost sm" data-onclick="cmpRenderAuditoria()">Atualizar</button></div>
+        <div class="tbl-wrap"><table><thead><tr><th>Quando</th><th>Ação</th><th>Entidade</th><th>Registro</th><th>Detalhes</th></tr></thead><tbody id="cmpAuditoriaBody"></tbody></table></div>
+        <div class="empty" id="cmpAuditoriaEmpty">Nenhum evento registrado.</div>
       </div>
     </div>
 
