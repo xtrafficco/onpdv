@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Raio-X Financeiro · harness visual</title>
+  <link rel="stylesheet" href="../../assets/css/onpdv.css">
+  <link rel="stylesheet" href="../../assets/css/onpdv-raiox.css">
+</head>
+<body>
+<!-- Reproduz a casca do back-office (bo > bo-main > bo-content) para que a
+     aba renderize exatamente como dentro do ONPDV, sem exigir login. -->
+<main id="appHost">
+  <div id="app">
+    <div class="bo">
+      <aside class="bo-side"><div class="bo-side-head"><div class="bo-brand"><span class="on">ON</span>PDV</div></div></aside>
+      <div class="bo-main">
+        <header class="bo-top"><div class="bo-title">Raio-X Financeiro</div></header>
+        <div class="bo-content">
+          <div id="page-raiox" class="page act"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="raiox-fixture.js"></script>
+<script>
+  // stub do cliente Supabase: devolve o fixture no lugar da RPC
+  window.ONPDV_SB = {
+    rpc: function (name) {
+      if (name !== 'erp_raiox_dataset') return Promise.resolve({ data: null, error: null });
+      return new Promise(function (r) {
+        setTimeout(function () { r({ data: window.RAIOX_FIXTURE.build(), error: null }); }, 120);
+      });
+    }
+  };
+  window.toast = function (m) { console.log('[toast]', m); };
+</script>
+<script src="../../assets/js/onpdv-raiox.js"></script>
+<script>window.ONPDV_RAIOX.open();</script>
+</body>
+</html>

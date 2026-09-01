@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.01-v47",
+  "version": "2026.09.01-v48",
   "installer": "/downloads/onpdv-caixa.bat",
-  "notes": "Frente de caixa offline: cache de referência, fila de vendas/operações, sincronização automática, QR local, pílula de conexão."
+  "notes": "Raio-X Financeiro: nova aba de relatório gerencial em 14 capítulos (DRE, resultado por loja, compras × CMV, curva ABC, atrasos e juros, projeção de caixa em 13 semanas, diagnóstico e plano de ação), alimentada direto pelos lançamentos do sistema."
 }

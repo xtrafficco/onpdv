@@ -339,7 +339,7 @@ const PAGE_TITLES={ home:'Início', decisao:'Central de Decisão', importexcel:'
   simuladores:'Simuladores', assistente:'Assistente de gestão', pedidos:'Pedidos', entregas:'Entregas', clientes:'Clientes', vales:'Vale-presente', estoque:'Estoque',
   estoquecrm:'CRM inteligente · Estoque', validade:'Validade de lotes', inventario:'Inventário rotativo', nfimport:'NF-e importadas', encalhados:'Produtos encalhados', pedidoint:'Pedido inteligente', crediario:'Contas a receber',
   crediariocrm:'CRM inteligente · Contas a receber', pagar:'Contas a pagar', pagarcrm:'CRM inteligente · Contas a pagar', transfer:'Transferências', gaveta:'Caixa',
-  relatorio:'Relatório', concilmp:'Conciliação Mercado Pago', auditoria:'Auditoria', nps:'NPS · Satisfação', churn:'Clientes em risco', precos:'Preços por margem-alvo', promocoes:'Promoções', operacoes:'Operações 360', prevencao:'Prevenção de perdas', config:'Configurações',
+  relatorio:'Relatório', raiox:'Raio-X Financeiro', concilmp:'Conciliação Mercado Pago', auditoria:'Auditoria', nps:'NPS · Satisfação', churn:'Clientes em risco', precos:'Preços por margem-alvo', promocoes:'Promoções', operacoes:'Operações 360', prevencao:'Prevenção de perdas', config:'Configurações',
   cmpPainel:'Compras · Painel', cmpLista:'Compras · Lista', cmpListaIconha:'Compras · Lista Iconha', cmpListaReta:'Compras · Lista Reta', cmpCatalogo:'Compras · Catálogo', cmpPedido:'Compras · Montar pedido', cmpAprovacao:'Compras · Aprovação', cmpRecebimento:'Compras · Recebimento', cmpConcluido:'Compras · Pedidos concluídos', cmpFinanceiro:'Compras · Financeiro', cmpFornecedores:'Compras · Fornecedores', cmpCotacoes:'Compras · Cotações', cmpHistorico:'Compras · Histórico de preço', cmpAlertas:'Compras · Alertas', cmpAuditoria:'Compras · Auditoria' };
 const BO_PAGE_BUTTONS='.bo-nav [data-page]';
 $$(BO_PAGE_BUTTONS).forEach(b=> b.addEventListener('click',()=>openBoPage(b.dataset.page)));
@@ -357,7 +357,7 @@ const PERM_PAGES=[
   ['pedidos','📋 Pedidos'],['entregas','🚚 Entregas'],
   ['clientes','👤 Clientes'],['vales','🎁 Vale-presente'],['estoque','📦 Estoque'],['encalhados','📦 Produtos encalhados'],['pedidoint','🧠 Pedido inteligente'],
   ['crediario','🧾 Contas a receber'],['pagar','💸 Contas a pagar'],['transfer','🔄 Transferências'],
-  ['gaveta','💰 Caixa (gaveta)'],['relatorio','📊 Relatório'],['concilmp','💳 Conciliação MP'],['auditoria','🔎 Auditoria'],['nps','⭐ NPS'],['churn','📉 Clientes em risco'],['precos','🏷️ Preços por margem'],['promocoes','🎯 Promoções'],['operacoes','🛡️ Operações 360'],['prevencao','🚨 Prevenção de perdas'],['compras','🛒 Compras'],['config','⚙️ Configurações']];
+  ['gaveta','💰 Caixa (gaveta)'],['relatorio','📊 Relatório'],['raiox','📑 Raio-X Financeiro'],['concilmp','💳 Conciliação MP'],['auditoria','🔎 Auditoria'],['nps','⭐ NPS'],['churn','📉 Clientes em risco'],['precos','🏷️ Preços por margem'],['promocoes','🎯 Promoções'],['operacoes','🛡️ Operações 360'],['prevencao','🚨 Prevenção de perdas'],['compras','🛒 Compras'],['config','⚙️ Configurações']];
 const PERM_PDV=[
   ['pdv_desconto','F5 · Desconto no item'],['pdv_cancelar','F6 · Cancelar venda'],
   ['pdv_suprimento','F9 · Suprimento'],['pdv_sangria','F10 · Sangria'],
@@ -435,6 +435,7 @@ function openBoPage(pg){
   if(pg==='crediario') loadCrediario();
   if(pg==='crediariocrm') renderCrmRecv();
   if(pg==='relatorio'){ loadDash(); loadReport(); }
+  if(pg==='raiox') openRaioX();
   if(pg==='pedidos') loadOrders();
   if(pg==='entregas'){ loadDeliveries(); trkStart(); }
   if(pg==='pagar') loadPayables();
@@ -446,6 +447,29 @@ function openBoPage(pg){
   if(pg==='config'){ renderPdvTerminalsConfig(); renderTerminals(); renderStores(); renderUsers(); loadCashbackConfigCard(); renderPushCard(); }
   if(pg.startsWith('cmp') && window.CMP_PAGES && window.CMP_PAGES[pg]) window.CMP_PAGES[pg]();
 }
+/* Raio-X Financeiro: motor pesado (~120 KB) carregado só quando a aba abre.
+   Depois de carregado, ONPDV_RAIOX.open() cuida da busca e da renderização. */
+let RAIOX_LOADING=null;
+function openRaioX(){
+  if(window.ONPDV_RAIOX){ window.ONPDV_RAIOX.open(); return; }
+  const host=$('#page-raiox');
+  if(host && !host.innerHTML) host.innerHTML='<div class="card pad">Carregando o Raio-X Financeiro…</div>';
+  if(!RAIOX_LOADING){
+    RAIOX_LOADING=new Promise((resolve,reject)=>{
+      const s=document.createElement('script');
+      s.src='assets/js/onpdv-raiox.js';
+      s.addEventListener('load',resolve,{once:true});
+      s.addEventListener('error',()=>reject(new Error('Falha ao carregar o Raio-X Financeiro.')),{once:true});
+      document.body.appendChild(s);
+    }).catch(err=>{ RAIOX_LOADING=null; throw err; });
+  }
+  RAIOX_LOADING.then(()=>{ if(window.ONPDV_RAIOX) window.ONPDV_RAIOX.open(); })
+    .catch(err=>{
+      if(host) host.innerHTML='<div class="card pad">Não foi possível abrir o Raio-X Financeiro. Verifique a conexão e tente de novo.</div>';
+      toast(err.message,true);
+    });
+}
+
 function enterPdv(){
   currentPage='caixa';
   $('#app').classList.add('pdv-mode');

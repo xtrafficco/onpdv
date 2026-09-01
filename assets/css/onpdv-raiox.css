@@ -1,0 +1,194 @@
+/* =====================================================================
+   Raio-X Financeiro — folha de estilo da aba de relatório profundo.
+   Tudo é escopado em #page-raiox e usa o prefixo .rx- para não colidir
+   com o resto do ERP. Paleta herdada da marca ONPDV.
+   ===================================================================== */
+#page-raiox{
+  --rx-acc:#12307a; --rx-acc2:#1c4bb8; --rx-accsoft:#eaf0fb;
+  --rx-ink:#1c2333; --rx-tx:#1c2333; --rx-tx2:#596579; --rx-tx3:#8a94a6;
+  --rx-line:#e4e7ee; --rx-card:#fff;
+  --rx-pos:#1f7a45; --rx-possoft:#e3f6ec;
+  --rx-neg:#c0342e; --rx-negsoft:#fdeceb;
+  --rx-warn:#8a6b00; --rx-warnsoft:#fff2cc;
+  --rx-r:12px; --rx-sh:0 1px 2px rgba(16,24,40,.05),0 6px 20px rgba(16,24,40,.06);
+  font-size:14px; line-height:1.5; color:var(--rx-tx);
+}
+#page-raiox .rx-num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;white-space:nowrap}
+#page-raiox .rx-pos{color:var(--rx-pos)}
+#page-raiox .rx-neg{color:var(--rx-neg)}
+#page-raiox .rx-warn{color:var(--rx-warn)}
+#page-raiox .rx-hide{display:none!important}
+
+/* ---------- barra de controle ---------- */
+.rx-topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;justify-content:space-between;margin-bottom:14px}
+.rx-topbar h1{font-family:'Fredoka',sans-serif;font-size:22px;margin:0;letter-spacing:-.3px}
+.rx-topbar p{margin:3px 0 0;color:var(--rx-tx2);font-size:13px;max-width:70ch}
+.rx-ctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rx-ctrl label{font-size:11px;font-weight:800;color:var(--rx-tx2);text-transform:uppercase;letter-spacing:.3px}
+.rx-ctrl select{font:inherit;font-size:13px;padding:7px 9px;border:1.5px solid var(--rx-line);border-radius:8px;background:#fff;color:var(--rx-tx)}
+.rx-ctrl .rx-chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--rx-tx2);text-transform:none;letter-spacing:0;font-weight:600}
+
+/* ---------- navegação por capítulos ---------- */
+.rx-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1.5px solid var(--rx-line);margin-bottom:16px;padding-bottom:8px}
+.rx-tabs button{padding:7px 12px;border-radius:8px;font-size:13.5px;font-weight:700;color:var(--rx-tx2);background:transparent;white-space:nowrap}
+.rx-tabs button:hover{background:var(--rx-accsoft);color:var(--rx-acc)}
+.rx-tabs button.act{background:var(--rx-acc);color:#fff}
+.rx-tabs .rx-sep{width:1px;background:var(--rx-line);margin:2px 5px}
+
+/* ---------- cards ---------- */
+#page-raiox .rx-card{background:var(--rx-card);border:1px solid var(--rx-line);border-radius:var(--rx-r);
+  box-shadow:var(--rx-sh);padding:16px 18px;margin-bottom:16px}
+#page-raiox .rx-card>h2{font-family:'Fredoka',sans-serif;margin:0 0 3px;font-size:17px;letter-spacing:-.2px;
+  display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#page-raiox .rx-card>.rx-sub{margin:0 0 14px;color:var(--rx-tx2);font-size:12.5px;line-height:1.5}
+#page-raiox .rx-grid{display:grid;gap:12px}
+#page-raiox .rx-g4{grid-template-columns:repeat(4,1fr)}
+#page-raiox .rx-g3{grid-template-columns:repeat(3,1fr)}
+#page-raiox .rx-g2{grid-template-columns:repeat(2,1fr)}
+@media(max-width:1200px){#page-raiox .rx-g4{grid-template-columns:repeat(2,1fr)}#page-raiox .rx-g3{grid-template-columns:1fr 1fr}}
+@media(max-width:720px){#page-raiox .rx-g4,#page-raiox .rx-g3,#page-raiox .rx-g2{grid-template-columns:1fr}}
+
+#page-raiox .rx-kpi{background:#fff;border:1px solid var(--rx-line);border-radius:var(--rx-r);padding:13px 15px;box-shadow:var(--rx-sh)}
+#page-raiox .rx-kpi .rx-lb{font-size:11px;color:var(--rx-tx2);text-transform:uppercase;letter-spacing:.3px;font-weight:800}
+#page-raiox .rx-kpi .rx-vl{font-family:'Fredoka',sans-serif;font-size:24px;font-weight:700;letter-spacing:-.6px;margin-top:5px}
+#page-raiox .rx-kpi .rx-hint{font-size:12px;color:var(--rx-tx3);margin-top:3px;line-height:1.4}
+
+/* ---------- tabelas ---------- */
+#page-raiox .rx-scroll{overflow:auto;max-height:560px;border-radius:10px;border:1px solid var(--rx-line);margin-top:4px}
+#page-raiox table.rx-tb{width:100%;border-collapse:collapse;font-size:13px;background:#fff}
+#page-raiox table.rx-tb th,#page-raiox table.rx-tb td{padding:7px 10px;text-align:right;
+  border-bottom:1px solid var(--rx-line);white-space:nowrap;vertical-align:top}
+#page-raiox table.rx-tb th:first-child,#page-raiox table.rx-tb td:first-child{text-align:left;white-space:normal}
+#page-raiox table.rx-tb thead th{font-size:10.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--rx-tx2);
+  border-bottom:1.5px solid var(--rx-line);position:sticky;top:0;background:#f7f8fa;z-index:1;font-weight:800}
+#page-raiox table.rx-tb tbody tr:hover td{background:#f7f9ff}
+#page-raiox table.rx-tb tr.rx-tot td{font-weight:800;border-top:1.5px solid var(--rx-ink);background:#f4f6fa}
+#page-raiox table.rx-tb tr.rx-sub2 td{color:var(--rx-tx2)}
+#page-raiox table.rx-tb tr.rx-sub2 td:first-child{padding-left:26px}
+
+#page-raiox .rx-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:800;white-space:nowrap}
+#page-raiox .rx-pill.rx-p{background:var(--rx-possoft);color:var(--rx-pos)}
+#page-raiox .rx-pill.rx-n{background:var(--rx-negsoft);color:var(--rx-neg)}
+#page-raiox .rx-pill.rx-w{background:var(--rx-warnsoft);color:var(--rx-warn)}
+#page-raiox .rx-pill.rx-a{background:var(--rx-accsoft);color:var(--rx-acc)}
+#page-raiox .rx-bar{height:7px;border-radius:4px;background:#edf0f4;overflow:hidden;min-width:56px}
+#page-raiox .rx-bar i{display:block;height:100%;background:var(--rx-acc)}
+
+/* ---------- achados ---------- */
+#page-raiox .rx-find{border:1px solid var(--rx-line);border-left:4px solid var(--rx-tx3);border-radius:10px;
+  padding:12px 15px;margin-bottom:10px;background:#fff}
+#page-raiox .rx-find.rx-c{border-left-color:var(--rx-neg)}
+#page-raiox .rx-find.rx-a{border-left-color:var(--rx-warn)}
+#page-raiox .rx-find.rx-b{border-left-color:var(--rx-acc)}
+#page-raiox .rx-find h3{font-family:'Fredoka',sans-serif;margin:0 0 4px;font-size:15px;display:flex;gap:8px;
+  align-items:baseline;flex-wrap:wrap}
+#page-raiox .rx-find .rx-sev{font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
+  padding:2px 7px;border-radius:5px}
+#page-raiox .rx-find.rx-c .rx-sev{background:var(--rx-negsoft);color:var(--rx-neg)}
+#page-raiox .rx-find.rx-a .rx-sev{background:var(--rx-warnsoft);color:var(--rx-warn)}
+#page-raiox .rx-find.rx-b .rx-sev{background:var(--rx-accsoft);color:var(--rx-acc)}
+#page-raiox .rx-find p{margin:5px 0 0;font-size:13px;color:var(--rx-tx2);line-height:1.6}
+#page-raiox .rx-find .rx-do{margin-top:8px;padding:9px 11px;background:#f7f9fb;border-radius:8px;font-size:12.5px;line-height:1.6}
+#page-raiox .rx-find .rx-do b{color:var(--rx-tx)}
+#page-raiox .rx-find .rx-money{font-weight:800;color:var(--rx-tx)}
+
+/* ---------- texto do relatório ---------- */
+#page-raiox .rx-rp{font-size:14px;line-height:1.72;margin:0 0 11px;max-width:88ch;color:#25333f}
+#page-raiox .rx-rp b{color:var(--rx-tx)}
+#page-raiox .rx-note{font-size:12px;color:var(--rx-tx3);margin-top:10px;line-height:1.55}
+#page-raiox .rx-chnum{font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--rx-acc);
+  font-weight:800;margin-bottom:2px}
+#page-raiox .rx-ch{page-break-before:always;break-before:page}
+#page-raiox .rx-h3{font-family:'Fredoka',sans-serif;font-size:14.5px;margin:18px 0 6px}
+#page-raiox .rx-callout{border-left:4px solid var(--rx-acc);background:var(--rx-accsoft);padding:12px 15px;
+  border-radius:0 9px 9px 0;margin:12px 0;font-size:13.5px;line-height:1.65}
+#page-raiox .rx-callout.rx-danger{border-left-color:var(--rx-neg);background:var(--rx-negsoft)}
+#page-raiox .rx-callout b{color:var(--rx-tx)}
+#page-raiox .rx-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--rx-tx2);margin-top:6px}
+#page-raiox .rx-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+#page-raiox .rx-toc{columns:2;column-gap:34px;font-size:13.5px}
+#page-raiox .rx-toc div{padding:4px 0;break-inside:avoid}
+#page-raiox .rx-toc span{color:var(--rx-acc);font-weight:800;margin-right:7px}
+@media(max-width:700px){#page-raiox .rx-toc{columns:1}}
+#page-raiox .rx-st{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0}
+#page-raiox .rx-st.rx-ok{background:var(--rx-pos)}
+#page-raiox .rx-st.rx-at{background:var(--rx-warn)}
+#page-raiox .rx-st.rx-ru{background:var(--rx-neg)}
+#page-raiox .rx-st.rx-na{background:#c7cfd9}
+#page-raiox svg text{font-family:'Nunito',sans-serif}
+
+/* ---------- capa do relatório ---------- */
+#page-raiox .rx-cover{background:linear-gradient(160deg,#12307a 0%,#0a1c4d 100%);color:#fff;border:0;padding:40px 36px}
+#page-raiox .rx-cover h1{font-family:'Fredoka',sans-serif;margin:0 0 6px;font-size:32px;letter-spacing:-1px;line-height:1.12}
+#page-raiox .rx-cover .rx-lead{color:#b9c8ee;font-size:14.5px;max-width:72ch;margin:0 0 22px;line-height:1.6}
+#page-raiox .rx-cover .rx-chnum{color:#ffcf3f}
+#page-raiox .rx-cover .rx-hl{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:22px 0 4px}
+#page-raiox .rx-cover .rx-hl div{background:rgba(255,255,255,.09);border-radius:10px;padding:12px 14px}
+#page-raiox .rx-cover .rx-hl small{display:block;color:#b9c8ee;font-size:11px;margin-bottom:4px}
+#page-raiox .rx-cover .rx-hl b{font-family:'Fredoka',sans-serif;font-size:19px;letter-spacing:-.4px}
+#page-raiox .rx-cover .rx-meta{display:flex;gap:30px;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,.18);
+  padding-top:18px;margin-top:6px}
+#page-raiox .rx-cover .rx-meta div small{display:block;color:#98a9d4;font-size:10.5px;letter-spacing:.9px;
+  text-transform:uppercase;margin-bottom:3px}
+#page-raiox .rx-cover .rx-meta div b{font-family:'Fredoka',sans-serif;font-size:17px;font-weight:600}
+@media(max-width:820px){
+  #page-raiox .rx-cover{padding:26px 20px}
+  #page-raiox .rx-cover h1{font-size:24px}
+  #page-raiox .rx-cover .rx-hl{grid-template-columns:1fr 1fr}
+}
+
+/* ---------- premissas ---------- */
+#page-raiox .rx-cfgrow{display:flex;gap:12px;align-items:center;justify-content:space-between;
+  padding:10px 0;border-bottom:1px solid var(--rx-line);flex-wrap:wrap}
+#page-raiox .rx-cfgrow:last-of-type{border:0}
+#page-raiox .rx-cfgrow small{display:block;color:var(--rx-tx2);font-size:12px;max-width:64ch;line-height:1.5;margin-top:2px}
+#page-raiox .rx-cfgrow input{font:inherit;font-size:14px;width:96px;padding:7px 9px;border:1.5px solid var(--rx-line);
+  border-radius:8px;text-align:right}
+#page-raiox .rx-cfgrow .rx-med{font-size:11.5px;font-weight:800;color:var(--rx-acc);cursor:pointer;
+  background:var(--rx-accsoft);border-radius:6px;padding:3px 8px;margin-left:6px}
+
+#page-raiox .rx-empty{text-align:center;padding:44px 20px;color:var(--rx-tx2)}
+#page-raiox .rx-empty .rx-ico{font-size:40px}
+
+/* =====================================================================
+   Impressão. O ERP esconde tudo por padrão (body>* {display:none}) para
+   imprimir só o cupom; aqui invertemos isso quando o corpo recebe
+   .rx-print, com especificidade maior.
+   ===================================================================== */
+@media print{
+  @page{size:A4;margin:12mm 10mm}
+  body.rx-print{background:#fff!important;overflow:visible!important}
+  body.rx-print>*{display:none!important}
+  body.rx-print>#appHost{display:block!important}
+  body.rx-print #app,body.rx-print .bo,body.rx-print .bo-main,body.rx-print .bo-content{
+    display:block!important;height:auto!important;min-height:0!important;overflow:visible!important;
+    padding:0!important;margin:0!important;background:#fff!important}
+  body.rx-print .bo-side,body.rx-print .bo-top,body.rx-print .bo-sidebar-scrim,
+  body.rx-print .rx-noprint,body.rx-print .rx-tabs,body.rx-print .rx-ctrl{display:none!important}
+  body.rx-print .page{display:none!important}
+  body.rx-print #page-raiox{display:block!important;font-size:10pt}
+  body.rx-print #page-raiox .rx-card{box-shadow:none;border:1px solid #d5dce4;break-inside:avoid;
+    page-break-inside:avoid;margin-bottom:10px;padding:11px 13px}
+  body.rx-print #page-raiox .rx-card>h2{font-size:12.5pt}
+  body.rx-print #page-raiox .rx-scroll{max-height:none!important;overflow:visible!important;border:0}
+  body.rx-print #page-raiox table.rx-tb{font-size:8.4pt}
+  body.rx-print #page-raiox table.rx-tb th,body.rx-print #page-raiox table.rx-tb td{padding:3px 5px}
+  body.rx-print #page-raiox table.rx-tb thead th{position:static;background:#f1f4f7!important;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body.rx-print #page-raiox table.rx-tb tr.rx-tot td{background:#f1f4f7!important;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body.rx-print #page-raiox .rx-kpi{break-inside:avoid;padding:8px 10px}
+  body.rx-print #page-raiox .rx-kpi .rx-vl{font-size:14pt}
+  body.rx-print #page-raiox .rx-find,body.rx-print #page-raiox .rx-callout,
+  body.rx-print #page-raiox .rx-cfgrow{break-inside:avoid}
+  body.rx-print #page-raiox .rx-cover{-webkit-print-color-adjust:exact;print-color-adjust:exact;
+    page-break-after:always;break-after:page}
+  body.rx-print #page-raiox .rx-ch{page-break-before:always;break-before:page}
+  body.rx-print #page-raiox .rx-rp{font-size:9.6pt;max-width:none}
+  body.rx-print #page-raiox .rx-bar,body.rx-print #page-raiox .rx-bar i,
+  body.rx-print #page-raiox .rx-pill{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body.rx-print #page-raiox svg{max-height:200px}
+  body.rx-print .rx-printhead{display:block!important;border-bottom:1px solid #c9d2dc;padding-bottom:6px;
+    margin-bottom:12px;font-size:8.4pt;color:#4a5a6a;letter-spacing:.2px}
+}
+.rx-printhead{display:none}
