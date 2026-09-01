@@ -28,7 +28,7 @@ let CURRENT_STORE = null, TR_CART = [], MATRIZ_STOCK = {}, FRETE_RULES = [];
 // Ao gerar a transferência, essas listas são esvaziadas.
 let TR_SOURCE_LISTS = [];
 let CB_ACTIVE = false;   // programa de cashback ligado? (controla o resgate no checkout)
-async function loadCashbackActive(){ try{ const { data } = await sb.rpc('cashback_config_get'); CB_ACTIVE = !!(data && data.ativo); }catch(e){ CB_ACTIVE=false; } }
+async function loadCashbackActive(){ try{ const { data, error } = await sb.rpc('cashback_config_get'); if(error) throw error; CB_ACTIVE = !!(data && data.ativo); refCachePut('cashback_active', CB_ACTIVE, true); }catch(e){ const c = isNetworkErr(e) ? await refCacheGet('cashback_active') : undefined; CB_ACTIVE = (c===undefined) ? false : !!c; } }
 let POS_CHAN = null;
 
 function toast(msg, err){ const t=$('#toast'); t.setAttribute('role',err?'alert':'status'); t.setAttribute('aria-live',err?'assertive':'polite'); t.textContent=msg; t.className='toast show'+(err?' err':''); clearTimeout(toast.t); toast.t=setTimeout(()=>t.className='toast',2600); }
@@ -275,9 +275,26 @@ window.openMyPasswordGo = async ()=>{
 };
 
 async function onLogin(session){
-  const { data:me, error:meError } = await sb.from('app_users').select('*').eq('id', session.user.id).maybeSingle();
+  // Busca o perfil do usuário; offline, cai no último perfil salvo (semeado num login online).
+  let me=null, meError=null;
+  try{
+    const r = await sb.from('app_users').select('*').eq('id', session.user.id).maybeSingle();
+    if(r.error) throw r.error;
+    me = r.data;
+    if(me) refCachePut('me:'+session.user.id, me, true);   // semeia o cache p/ próximos boots offline
+  }catch(e){
+    if(isNetworkErr(e)){ me = await refCacheGet('me:'+session.user.id); meError = me?null:e; }
+    else meError = e;
+  }
   const validRole=me && ['admin','operador','motoboy'].includes(me.papel);
   if(meError || !me || !validRole || me.ativo===false || (me.papel!=='admin' && !me.store_id)){
+    // Offline sem perfil salvo: não expulsa o operador (a rede pode ter caído) — só orienta.
+    // Online (ou conta comprovadamente inválida): mantém o bloqueio de acesso de sempre.
+    if(!navigator.onLine && !me){
+      $('#app').classList.add('hide'); $('#login').classList.remove('hide');
+      $('#liMsg').textContent='Sem internet e sem dados salvos deste usuário. Conecte-se uma vez para liberar o modo offline.';
+      ME=null; return;
+    }
     await sb.auth.signOut({scope:'local'});
     $('#app').classList.add('hide'); $('#login').classList.remove('hide');
     $('#liMsg').textContent='Conta sem acesso ativo ao ONPDV. Fale com o administrador.';
@@ -289,20 +306,31 @@ async function onLogin(session){
   ME.permissoes = me.permissoes || {};
   ME.name=ME.nome; ME.is_admin=(ME.papel==='admin'); ME.is_cashier=(ME.papel==='admin'||ME.papel==='operador');
   $('#whoName').innerHTML = `<b>${esc(ME.nome)}</b> · ${esc(ME.papel)}`;
+  // Isolamento por usuário: se o cache pertence a OUTRO operador, limpa o cache de
+  // referência (não as filas — não podemos perder venda não sincronizada) antes de recarregar.
+  try{
+    const prevOwner=await refCacheGet('cache_owner');
+    if(prevOwner && prevOwner!==session.user.id) await refCacheClearRefs();
+    refCachePut('cache_owner', session.user.id, true);
+  }catch(e){}
   await loadStores();
-  await Promise.all([loadProducts(), loadCustomers(), loadTerminals(), loadCompany(), loadSuppliers(), loadFreteRules(), loadCashbackActive(), loadPromos(), loadEdgeCapabilities(['pdv-customer-express'])]);
+  // Carregadores tolerantes a offline: cada um cai no cache se a rede falhar. allSettled
+  // garante que um dataset que falhe (ex.: RPC de admin) não derrube o boot do caixa.
+  await Promise.allSettled([loadProducts(), loadCustomers(), loadTerminals(), loadCompany(), loadSuppliers(), loadFreteRules(), loadCashbackActive(), loadPromos(), loadEdgeCapabilities(['pdv-customer-express'])]);
+  if(navigator.onLine) markRefSynced();   // registra a idade do snapshot online
   buildPdvCatalog();
   const d=new Date(); d.setDate(d.getDate()+30);
   const cv=$('#credVenc'); if(cv) cv.value = d.toISOString().slice(0,10);
   const hoje=new Date().toISOString().slice(0,10);
   $('#repIni').value=hoje; $('#repFim').value=hoje;
-  await refreshCash();
-  loadDash();
+  try{ await refreshCash(); }catch(e){}   // offline: caixa/gaveta seguem sem travar o login
+  try{ loadDash(); }catch(e){}
   applyRoleUI();
   if(ME && ME.papel==='motoboy'){ showMoto(); }
   else if(ME && ME.papel==='admin'){ openBoPage('home'); startPickupPoll(); }
   else { enterPdv(); startPickupPoll(); }
   pushRefreshIfEnabled();   // revalida a inscrição de push deste dispositivo (não bloqueia o login)
+  checkForUpdate();         // avisa se há versão nova publicada (não bloqueia o login)
 }
 
 // ======================= NAV / BACKOFFICE =======================
@@ -443,24 +471,37 @@ async function checkPickups(){
 function startPickupPoll(){ clearInterval(pickupTimer); checkPickups(); pickupTimer=setInterval(checkPickups, 15000); }
 // ======================= DATA LOADERS =======================
 async function loadProducts(){
-  if(CURRENT_STORE){
-    const { data } = await sb.rpc('erp_products',{ p_store: CURRENT_STORE });
-    PRODUCTS = data||[];
-  } else {
-    const { data } = await sb.from('products').select('*').eq('ativo',true).order('nome');
-    PRODUCTS = (data||[]).map(p=>({ ...p, estoque:0 }));
-  }
+  const key='products:'+(CURRENT_STORE||'all');   // cache por loja: estoques não se misturam
+  const { data } = await refetch(key, async ()=>{
+    if(CURRENT_STORE){
+      const r=await sb.rpc('erp_products',{ p_store: CURRENT_STORE }); if(r.error) throw r.error;
+      return r.data||[];
+    }
+    const r=await sb.from('products').select('*').eq('ativo',true).order('nome'); if(r.error) throw r.error;
+    return (r.data||[]).map(p=>({ ...p, estoque:0 }));
+  });
+  PRODUCTS = data||[];
 }
 async function loadCustomers(){
-  const { data } = await sb.from('customers').select('*').eq('ativo',true).order('nome');
+  const { data } = await refetch('customers', async ()=>{
+    const r = await sb.from('customers').select('*').eq('ativo',true).order('nome'); if(r.error) throw r.error;
+    return r.data||[];
+  });
   CUSTOMERS = data||[];
 }
 async function loadSuppliers(){
-  const { data } = await sb.from('suppliers').select('id,nome').eq('ativo',true).order('nome');
+  const { data } = await refetch('suppliers', async ()=>{
+    const r = await sb.from('suppliers').select('id,nome').eq('ativo',true).order('nome'); if(r.error) throw r.error;
+    return r.data||[];
+  });
   SUPPLIERS = data||[];
 }
 async function loadTerminals(){
-  const { data } = await sb.from('pos_terminals').select('*').eq('ativo',true).eq('finalidade','pagamento').eq('provedor','mercadopago').order('nome');
+  const { data:_t } = await refetch('terminals', async ()=>{
+    const r = await sb.from('pos_terminals').select('*').eq('ativo',true).eq('finalidade','pagamento').eq('provedor','mercadopago').order('nome'); if(r.error) throw r.error;
+    return r.data||[];
+  }, true);
+  const data=_t;
   TERMINALS = data||[];
   const sel = $('#posTerm');
   if(sel) sel.innerHTML = TERMINALS.length
@@ -468,7 +509,10 @@ async function loadTerminals(){
     : '<option value="">— cadastre em Config —</option>';
 }
 async function loadStores(){
-  const { data } = await sb.from('stores').select('*').eq('ativo',true).order('nome');
+  const { data } = await refetch('stores', async ()=>{
+    const r = await sb.from('stores').select('*').eq('ativo',true).order('nome'); if(r.error) throw r.error;
+    return r.data||[];
+  }, true);
   STORES = data||[];
   if(!CURRENT_STORE && STORES.length) CURRENT_STORE = (ME && ME.store_id) || STORES[0].id;
   const sel=$('#storeSel');
@@ -514,7 +558,7 @@ $('#storeSel').onchange = async ()=>{
 // venda) e como FALLBACK se o IDB não abrir. A UI lê de OFFLINE_MEM (cache em memória),
 // então tudo que era síncrono continua síncrono. Idempotência garantida por client_id.
 const OFFLINE_KEY='onpdv_offline_queue';
-const IDB_NAME='onpdv', IDB_STORE='offline_sales';
+const IDB_NAME='onpdv', IDB_STORE='offline_sales', REF_STORE='ref_cache';
 let OFFLINE_MEM=[];   // cache em memória — fonte síncrona para a UI
 let _idb=null;        // handle do IndexedDB (null → usa só localStorage)
 
@@ -522,8 +566,10 @@ function _lsRead(){ try{ return JSON.parse(localStorage.getItem(OFFLINE_KEY)||'[
 function _lsWrite(q){ try{ localStorage.setItem(OFFLINE_KEY, JSON.stringify(q)); }catch(e){ if(window.logErr) logErr('offline-ls', e); } }
 function _idbOpen(){ return new Promise(res=>{ try{
   if(!('indexedDB' in window)) return res(null);
-  const rq=indexedDB.open(IDB_NAME,1);
-  rq.onupgradeneeded=()=>{ const db=rq.result; if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE,{keyPath:'client_id'}); };
+  const rq=indexedDB.open(IDB_NAME,2);   // v2: além da fila de vendas, guarda o CACHE DE REFERÊNCIA (produtos/clientes/config)
+  rq.onupgradeneeded=()=>{ const db=rq.result;
+    if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE,{keyPath:'client_id'});
+    if(!db.objectStoreNames.contains(REF_STORE)) db.createObjectStore(REF_STORE,{keyPath:'k'}); };
   rq.onsuccess=()=>res(rq.result); rq.onerror=()=>res(null);
 }catch(e){ res(null); } }); }
 function _idbAll(){ return new Promise(res=>{ if(!_idb) return res([]); try{ const r=_idb.transaction(IDB_STORE,'readonly').objectStore(IDB_STORE).getAll(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>res([]); }catch(e){ res([]); } }); }
@@ -555,31 +601,201 @@ function _offlineRemove(id){ OFFLINE_MEM=OFFLINE_MEM.filter(x=>x.client_id!==id)
 function _offlineSetErr(id,msg){ const it=OFFLINE_MEM.find(x=>x.client_id===id); if(it){ it.err=msg; _lsWrite(OFFLINE_MEM); if(_idb) _idbPut(it); } }
 function isNetworkErr(e){ if(!navigator.onLine) return true; const m=((e&&e.message)||String(e||'')).toLowerCase();
   return /fetch|network|failed to|load failed|timeout|timed out|econn|offline/.test(m); }
+// Erro de autenticação (JWT expirado numa queda longa) — NÃO é erro de dados: dá para
+// renovar a sessão e re-tentar, em vez de marcar a venda como "com erro" indevidamente.
+function isAuthErr(e){ if(!e) return false;
+  const m=((e.message||e.error_description||e.msg||'')+'').toLowerCase();
+  const c=String((e.code!=null?e.code:e.status)||'');
+  return c==='401' || c==='PGRST301' || /jwt|token (has )?expired|not authenticated|unauthorized|invalid (jwt|token|claim)/.test(m); }
 function updateOfflineBadge(){
   const el=$('#offlineBadge'); if(!el) return;
-  const n=OFFLINE_MEM.length, online=navigator.onLine;
-  el.classList.toggle('off', !online || n>0);
-  el.innerHTML = (online?'● Online':'● Offline') + (n>0?' · '+n+' na fila':'');
+  let nOps=0; try{ nOps=_opsRead().length; }catch(e){}
+  const n=OFFLINE_MEM.length, online=navigator.onLine, tot=n+nOps;
+  // 3 estados: online e em dia (verde) · online com fila pendente (âmbar) · offline (vermelho)
+  el.classList.toggle('online', online && tot===0);
+  el.classList.toggle('pending', online && tot>0);
+  el.classList.toggle('off', !online);
+  const fila = n>0 ? (n+' venda(s)'+(nOps>0?' + '+nOps+' op.':'')) : (nOps>0? nOps+' op.' : '');
+  el.innerHTML = (online?'● Online':'● Offline') + (fila?' · '+fila+' na fila':'');
+  const age = (!online && REF_SYNCED_AT)
+    ? (' · dados de '+new Date(REF_SYNCED_AT).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})) : '';
+  el.title = (online
+    ? (tot>0?('Conectado · '+fila+' aguardando sincronizar (clique para sincronizar agora)'):'Conectado e sincronizado')
+    : ('Sem internet · vendendo offline'+(fila?(' · '+fila+' salvas para sincronizar'):''))) + age;
+}
+let _authRefreshing=false;
+async function _refreshAuthOnce(){ if(_authRefreshing) return; _authRefreshing=true;
+  try{ await sb.auth.refreshSession(); }catch(_){} finally{ setTimeout(()=>{_authRefreshing=false;}, 3000); } }
+// Ao reconectar com vendas na fila e apenas uma sessão PROVISÓRIA (aberta offline), abre a
+// sessão de gaveta REAL do terminal para que as vendas sincronizadas entrem na Leitura X /
+// fechamento daquele caixa. Se falhar, as vendas ainda sincronizam (só sem gaveta, como antes).
+async function pdvReconcileOfflineSession(){
+  if(!navigator.onLine) return;
+  if(!OFFLINE_MEM.length) return;
+  if(PDV.ses && !PDV.ses.offline) return;   // já há sessão real
+  const term=(PDV.ses&&PDV.ses.terminal)||PDV.terminal||(typeof pdvTerm==='function'?pdvTerm():'CAIXA-1');
+  const opening=(PDV.ses&&+PDV.ses.opening)||0;
+  try{
+    const cur=await sb.rpc('pdv_current_session',{p_terminal:term});
+    if(!cur.error && cur.data && cur.data.status==='aberto'){ PDV.ses=cur.data; }
+    else{ const op=await sb.rpc('pdv_open_session',{p_terminal:term,p_opening:opening});
+      if(!op.error && op.data){ PDV.ses=op.data; } }
+    if(PDV.ses && !PDV.ses.offline){
+      refCachePut('pdv_session:'+term, PDV.ses, true);
+      if(currentPage==='caixa' && typeof renderCaixa==='function') renderCaixa();
+    }
+  }catch(e){ /* mantém provisória; vendas sincronizam mesmo assim */ }
 }
 async function flushOffline(){
   if(!navigator.onLine) return;
+  await pdvReconcileOfflineSession();   // garante uma sessão de gaveta real p/ as vendas offline caírem certo
   const q=OFFLINE_MEM.slice(); if(!q.length) return;
-  let sync=0;
+  let sync=0, sawAuth=false;
   for(const item of q){
     try{
       const { error } = await sb.rpc('pdv_sync_offline_sale', { p_device_sale_id:item.client_id, p_payload:item.payload });
-      if(error){ if(isNetworkErr(error)){ /* rede: mantém p/ próxima tentativa */ } else { _offlineSetErr(item.client_id, error.message); } }
+      if(error){
+        if(isNetworkErr(error)){ /* rede: mantém p/ próxima tentativa */ }
+        else if(isAuthErr(error)){ sawAuth=true; await _refreshAuthOnce(); /* mantém p/ re-tentar */ }
+        else { _offlineSetErr(item.client_id, error.message); }
+      }
       else { _offlineRemove(item.client_id); sync++; }
-    }catch(e){ /* rede: mantém */ }
+    }catch(e){ if(isAuthErr(e)){ sawAuth=true; await _refreshAuthOnce(); } /* rede/auth: mantém */ }
   }
+  if(sawAuth) setTimeout(()=>{ if(navigator.onLine && OFFLINE_MEM.length) flushOffline(); }, 1800);  // re-tenta após renovar a sessão
   if(sync>0){ toast(sync+' venda(s) offline sincronizada(s) ✅'); try{ await loadProducts(); buildPdvCatalog(); refreshCash(); loadDash(); if(currentPage==='caixa'&&typeof renderCaixa==='function')renderCaixa(); }catch(e){} }
   const withErr=OFFLINE_MEM.filter(x=>x.err).length;
   if(withErr>0) toast(withErr+' venda(s) offline precisam de atenção (erro ao sincronizar).', true);
+  flushOps();   // ao reconectar, sincroniza também clientes/movimentações pendentes
 }
 window.addEventListener('online', ()=>{ updateOfflineBadge(); flushOffline(); });
 window.addEventListener('offline', updateOfflineBadge);
 setInterval(()=>{ if(navigator.onLine && OFFLINE_MEM.length) flushOffline(); }, 20000);
-offlineInit();
+const OFFLINE_READY = offlineInit();   // promessa: resolve quando o IDB abriu e a fila foi carregada
+
+// ============ CACHE OFFLINE DE REFERÊNCIA (produtos, clientes, config, sessão…) ============
+// Guarda o ÚLTIMO snapshot online de cada dataset para o caixa ABRIR e VENDER offline.
+// Primário: IndexedDB (store ref_cache) — cabe catálogo/clientes grandes. Espelho opcional:
+// localStorage (só chaves pequenas e críticas: usuário, lojas, empresa) para boot resiliente
+// mesmo se o IDB demorar. Chaves incluem a loja atual para não misturar estoques entre lojas.
+const REF_LS_PREFIX='onpdv_ref_';
+function _refLsGet(k){ try{ const v=localStorage.getItem(REF_LS_PREFIX+k); return v?JSON.parse(v):undefined; }catch(e){ return undefined; } }
+function _refLsPut(k,v){ try{ localStorage.setItem(REF_LS_PREFIX+k, JSON.stringify(v)); }catch(e){ /* cota estourou: o IDB cobre datasets grandes */ } }
+async function refCacheGet(k){ await OFFLINE_READY;
+  if(!_idb) return _refLsGet(k);
+  return new Promise(res=>{ try{ const r=_idb.transaction(REF_STORE,'readonly').objectStore(REF_STORE).get(k);
+    r.onsuccess=()=>res(r.result?r.result.v:_refLsGet(k)); r.onerror=()=>res(_refLsGet(k)); }
+    catch(e){ res(_refLsGet(k)); } }); }
+async function refCachePut(k,v,mirror){ await OFFLINE_READY;
+  if(mirror) _refLsPut(k,v);   // só datasets pequenos pedem espelho síncrono
+  if(!_idb) return false;
+  return new Promise(res=>{ try{ const t=_idb.transaction(REF_STORE,'readwrite'); t.objectStore(REF_STORE).put({k,v,at:Date.now()});
+    t.oncomplete=()=>res(true); t.onerror=()=>res(false); }catch(e){ res(false); } }); }
+// Executa o carregador ONLINE; grava no cache em caso de sucesso; se cair a REDE, restaura do
+// cache; qualquer outro erro (permissão, dado inválido) é propagado como antes.
+async function refetch(key, fetcher, mirror){
+  try{ const data = await fetcher();
+    if(data!==undefined && data!==null){ refCachePut(key, data, mirror); }
+    return { data, cached:false };
+  }catch(e){
+    if(isNetworkErr(e)){ const c = await refCacheGet(key); if(c!==undefined) return { data:c, cached:true }; }
+    throw e;
+  }
+}
+// Idade do último snapshot online (mostrada na pílula quando offline).
+let REF_SYNCED_AT=0;
+function markRefSynced(){ REF_SYNCED_AT=Date.now(); refCachePut('ref_synced_at', REF_SYNCED_AT, true); updateOfflineBadge(); }
+refCacheGet('ref_synced_at').then(v=>{ if(v){ REF_SYNCED_AT=+v||0; updateOfflineBadge(); } }).catch(()=>{});
+// Limpa só o CACHE DE REFERÊNCIA (produtos/clientes/config) — NÃO mexe nas filas de venda/
+// operações (não podemos perder o que ainda não sincronizou). Usado ao trocar de usuário.
+async function refCacheClearRefs(){ await OFFLINE_READY;
+  try{ Object.keys(localStorage).forEach(k=>{ if(k.indexOf(REF_LS_PREFIX)===0) localStorage.removeItem(k); }); }catch(e){}
+  if(_idb){ try{ _idb.transaction([REF_STORE],'readwrite').objectStore(REF_STORE).clear(); }catch(e){} }
+}
+// Revalida o catálogo/promoções/clientes em 2º plano quando online e ocioso, para o cache
+// não envelhecer numa queda longa. Não roda durante uma venda em andamento.
+setInterval(async ()=>{
+  if(!navigator.onLine || !window.ME) return;
+  if(typeof currentPage!=='undefined' && currentPage!=='caixa') return;
+  if(typeof PDV!=='undefined' && PDV.items && PDV.items.length) return;
+  try{ await Promise.allSettled([loadProducts(), loadPromos(), loadCustomers()]);
+    if(typeof buildPdvCatalog==='function') buildPdvCatalog(); markRefSynced(); }catch(e){}
+}, 8*60*1000);
+// ============ FILA OFFLINE DE OPERAÇÕES (sangria/suprimento e cadastro de cliente) ============
+// Diferente da fila de vendas (crítica, em IDB), estas operações são poucas e vão em
+// localStorage. Idempotência por client_id (o servidor deduplica por client_uuid).
+// Ordem de sync: CLIENTES antes das VENDAS (a venda referencia o cliente por client_id).
+const OPS_KEY='onpdv_offline_ops';
+function _opsRead(){ try{ const q=JSON.parse(localStorage.getItem(OPS_KEY)||'[]'); return Array.isArray(q)?q:[]; }catch(e){ return []; } }
+function _opsWrite(q){ try{ localStorage.setItem(OPS_KEY, JSON.stringify(q)); }catch(e){ if(window.logErr) logErr('offline-ops-ls', e); } }
+function _opsCount(){ return _opsRead().length; }
+function enqueueOp(op){
+  if(!op.client_id) op.client_id=(window.crypto&&crypto.randomUUID?crypto.randomUUID():uid());
+  const q=_opsRead(); q.push(op); _opsWrite(q); updateOfflineBadge(); return op.client_id;
+}
+async function flushOps(){
+  if(!navigator.onLine) return;
+  let q=_opsRead(); if(!q.length) return;
+  q = q.slice().sort((a,b)=> (a.kind==='customer'?0:1) - (b.kind==='customer'?0:1));  // clientes primeiro
+  const keep=[]; let n=0;
+  for(const op of q){
+    try{
+      if(op.kind==='customer'){
+        const { data, error } = await sb.rpc('erp_sync_offline_customer',{ p_client_id:op.client_id, p:op.payload });
+        if(error) throw error;
+        if(data && data.ok) n++; else keep.push(op);
+      }else if(op.kind==='movement'){
+        const { data, error } = await sb.rpc('pdv_sync_offline_movement',{ p_client_id:op.client_id, p_kind:op.mkind, p_amount:op.amount, p_reason:op.reason||null });
+        if(error) throw error;
+        if(data && data.ok) n++; else keep.push(op);   // ok=false (ex.: no_session) → tenta depois
+      }
+    }catch(e){ if(isAuthErr(e)) await _refreshAuthOnce(); keep.push(op); }   // rede/auth/RPC ausente → mantém
+  }
+  _opsWrite(keep); updateOfflineBadge();
+  if(n>0){ toast(n+' operação(ões) offline sincronizada(s) ✅');
+    try{ await loadCustomers(); await refreshCash(); if(currentPage==='caixa'&&typeof renderCaixa==='function')renderCaixa(); }catch(e){} }
+}
+window.pdvOfflineSync = function(){ flushOffline(); flushOps(); };   // gancho chamado ao (re)entrar no caixa
+window.addEventListener('online', flushOps);
+setInterval(()=>{ if(navigator.onLine && _opsCount()) flushOps(); }, 20000);
+// Reaquece o cache com o que está em memória (belt-and-suspenders) — chamado quando online.
+window.pdvOfflineCacheState = function(){
+  try{
+    if(Array.isArray(PRODUCTS)) refCachePut('products:'+(CURRENT_STORE||'all'), PRODUCTS);
+    if(Array.isArray(CUSTOMERS)) refCachePut('customers', CUSTOMERS);
+  }catch(e){}
+  updateOfflineBadge();
+};
+
+// ============ CHECAGEM DE NOVA VERSÃO (caixa instalado) ============
+// O caixa roda dos arquivos locais; para saber se saiu versão nova, consulta o version.json
+// do site publicado e avisa (com link para baixar o instalador). Não aplica sozinho.
+const ONPDV_VERSION='2026.09.01-v47';
+const ONPDV_SITE='https://onpdv.vercel.app';
+function _verKey(v){ v=String(v||''); const d=(v.match(/(\d{4})\.(\d{2})\.(\d{2})/)||[]).slice(1).join(''); const n=(v.match(/v(\d+)/i)||[])[1]||'0'; return [ +d||0, +n||0 ]; }
+function _updateIsNewer(a,b){ const ka=_verKey(a), kb=_verKey(b); return ka[0]>kb[0] || (ka[0]===kb[0] && ka[1]>kb[1]); }
+async function checkForUpdate(){
+  if(!navigator.onLine) return;
+  try{
+    const r=await fetch(ONPDV_SITE+'/version.json?ts='+Date.now(),{cache:'no-store'});
+    if(!r.ok) return;
+    const j=await r.json(); const latest=String(j&&j.version||'');
+    if(!latest || !_updateIsNewer(latest, ONPDV_VERSION)) return;
+    try{ if(localStorage.getItem('onpdv_update_dismissed')===latest) return; }catch(e){}
+    onpdvShowUpdateNotice(latest);
+  }catch(e){ /* CORS/rede: silencioso */ }
+}
+function onpdvShowUpdateNotice(latest){
+  if(document.getElementById('onpdvUpd')) return;
+  const bar=document.createElement('div'); bar.id='onpdvUpd';
+  bar.style.cssText='position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:#2b2140;color:#fff;border:1px solid #ffd76a;border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:center;box-shadow:0 10px 34px rgba(0,0,0,.4);font-family:inherit;max-width:640px;margin:0 auto';
+  bar.innerHTML='<span style="flex:1;font-size:14px;line-height:1.4">🔄 Nova versão do ONPDV Caixa disponível (<b>'+esc(latest)+'</b>). Baixe e reinstale para atualizar.</span>'
+    +'<a href="'+ONPDV_SITE+'/downloads/onpdv-caixa.bat" style="background:#ffd76a;color:#2b2140;font-weight:800;text-decoration:none;padding:8px 12px;border-radius:8px;white-space:nowrap">Baixar</a>'
+    +'<button id="onpdvUpdX" aria-label="Dispensar" style="background:transparent;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer">×</button>';
+  document.body.appendChild(bar);
+  const x=document.getElementById('onpdvUpdX');
+  if(x) x.onclick=()=>{ try{ localStorage.setItem('onpdv_update_dismissed', latest); }catch(e){} bar.remove(); };
+}
 // ======================= FLUXO MAQUININHA (TEF) =======================
 async function posFlow(saleId, numero, total, terminalId, tipo, parcelas,context){ window._posSettled=false; window._posKind=(context&&context.kind)||'venda';window._posContext=context||null;
   const tipoLbl = { credito:`Crédito ${parcelas>1?parcelas+'x':'à vista'}`, debito:'Débito', pix:'PIX', estorno:'Estorno / cancelamento' }[tipo];
@@ -709,6 +925,7 @@ async function pdvMaquininha(tipo, termId){
   tipo = tipo || 'credito';
   if(!PDV.items.length){toast('Nenhum item na venda');return;}
   if(!PDV.ses||PDV.ses.status!=='aberto'){toast('Abra o caixa (F11) antes');return;}
+  if(!navigator.onLine||PDV.ses.offline){toast('A maquininha exige internet. Use dinheiro ou outra forma para vender offline.', true);return;}
   const terms=(TERMINALS||[]);
   if(!terms.length){toast('Cadastre uma maquininha em Config → Maquininhas');return;}
   let term = termId ? terms.find(t=>t.id===termId) : null;
@@ -884,13 +1101,20 @@ async function pdvDelItem(i){
 function pdvSel(i){PDV.sel=i;renderCaixa();}
 
 let PROMOS={};
+function _applyPromos(rows){ PROMOS={};
+  (rows||[]).forEach(r=>{ const k=r.product_id; (PROMOS[k]=PROMOS[k]||[]).push({tipo:r.tipo||'unitario',min_qtd:+r.min_qtd||0,preco_promo:+r.preco_promo||0,pacote_preco:+r.pacote_preco||0}); });
+}
 async function loadPromos(){
+  const key='promos:'+(typeof CURRENT_STORE!=='undefined'?(CURRENT_STORE||'all'):'all');
   try{
     const {data,error}=await sb.rpc('pdv_promos_active',{p_store:(typeof CURRENT_STORE!=='undefined'?CURRENT_STORE:null)});
     if(error)throw error;
-    PROMOS={};
-    (data||[]).forEach(r=>{ const k=r.product_id; (PROMOS[k]=PROMOS[k]||[]).push({tipo:r.tipo||'unitario',min_qtd:+r.min_qtd||0,preco_promo:+r.preco_promo||0,pacote_preco:+r.pacote_preco||0}); });
-  }catch(e){ console.warn('loadPromos',e); PROMOS={}; }
+    refCachePut(key, data||[], true);
+    _applyPromos(data);
+  }catch(e){ console.warn('loadPromos',e);
+    const c = isNetworkErr(e) ? await refCacheGet(key) : null;
+    _applyPromos(Array.isArray(c)?c:[]);
+  }
 }
 // desconto automatico das promoções (aplicado como desconto de linha) — pega o maior desconto
 function promoDiscFor(it){
@@ -1010,7 +1234,7 @@ function pdvDeliveryPixQueueHtml(){
 }
 async function pdvLoadDeliveryPixQueue(silent){
   if(PDV.delivPixUnavailable)return;
-  if(!sb||!PDV.ses||PDV.ses.status!=='aberto'){PDV.delivPix=[];PDV.delivPixKnown=null;return;}
+  if(!sb||!PDV.ses||PDV.ses.status!=='aberto'||PDV.ses.offline){PDV.delivPix=[];PDV.delivPixKnown=null;return;}
   if(PDV.delivPixLoading)return;PDV.delivPixLoading=true;
   try{
     const {data,error}=await sb.rpc('pdv_delivery_pix_queue',{p_session:PDV.ses.id});if(error)throw error;
@@ -1032,7 +1256,7 @@ async function pdvLoadDeliveryPixQueue(silent){
 }
 function pdvOpenPickupOrder(id){if(id)pdvPickupFromCode('petshop:order:'+id);}
 async function pdvLoadPickupQueue(silent){
-  if(!sb||!PDV.ses||PDV.ses.status!=='aberto'){PDV.pickups=[];PDV.pickupKnown=null;return;}
+  if(!sb||!PDV.ses||PDV.ses.status!=='aberto'||PDV.ses.offline){PDV.pickups=[];PDV.pickupKnown=null;return;}
   if(PDV.pickupLoading)return;PDV.pickupLoading=true;
   try{
     const {data,error}=await sb.rpc('pdv_pickup_queue',{p_session:PDV.ses.id});if(error)throw error;
@@ -1106,6 +1330,7 @@ function renderCaixa(){
   el.innerHTML=
   '<div class="pdv">'
   +'<div class="pdv-head">'
+    +'<div class="pdv-net" id="offlineBadge" title="Estado da conexão" data-onclick="pdvOfflineTapSync()">● Online</div>'
     +'<div class="h-fields">'
       +'<div class="pdv-cons">CONSUMIDOR: <b>'+esc(cust?cust.name:'')+'</b>'
         +(cust?' <span style="font-size:13px;font-weight:700;opacity:.9">· cashback '+BRL(cust.cashback||0)
@@ -1193,8 +1418,65 @@ function renderCaixa(){
   const c=document.getElementById('pdvCode');
   if(c&&open&&!document.getElementById('pdvOv'))c.focus();
   pdvSyncFields();
+  updateOfflineBadge();   // pinta a pílula Online/Offline recém-recriada no cabeçalho
   cfdEnsure(); cfdPublish();   // espelha o carrinho na 2ª tela (vitrine.html), se houver
 }
+// Tocar/clicar na pílula força uma tentativa de sincronização (quando online e há fila).
+window.pdvOfflineTapSync = function(){
+  let nOps=0; try{ nOps=_opsRead().length; }catch(e){}
+  if(OFFLINE_MEM.length||nOps){ pdvOfflineQueueModal(); return; }   // há fila → abre a tela de detalhe
+  if(!navigator.onLine){ toast('Sem internet · as vendas estão salvas e sincronizam ao reconectar'); return; }
+  toast('Tudo sincronizado ✅');
+};
+// Soma de exibição do total de uma venda offline (a partir dos pagamentos do payload).
+function _offlineSaleTotal(item){
+  try{ return (item.payload.payments||[]).reduce((a,p)=>a+(+p.v||0),0); }catch(e){ return 0; }
+}
+// Tela da fila offline: lista vendas pendentes/erradas + operações, com sincronizar e descartar.
+window.pdvOfflineQueueModal = function(){
+  const online=navigator.onLine;
+  const sales=OFFLINE_MEM.slice().sort((a,b)=>(a.at||0)-(b.at||0));
+  let ops=[]; try{ ops=_opsRead(); }catch(e){}
+  const hhmm=t=>t?new Date(t).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
+  const salesHtml = sales.length ? sales.map(s=>{
+    const err=!!s.err;
+    return '<div class="m-row" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--hair,#eee2)">'
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-weight:700">'+BRL(_offlineSaleTotal(s))+' <span style="font-weight:600;opacity:.7;font-size:12px">· '+hhmm(s.at)+'</span></div>'
+        +'<div style="font-size:12px">'+(err
+            ?'<span class="chip" style="background:#fbe7e7;color:#a32d2d">⚠ '+esc(String(s.err).slice(0,80))+'</span>'
+            :'<span class="chip" style="background:#fbefd9;color:#8a5406">na fila</span>')+'</div>'
+      +'</div>'
+      +'<button class="btn ghost sm red" data-onclick="pdvOfflineDiscard(\''+s.client_id+'\')">Descartar</button>'
+    +'</div>';
+  }).join('') : '<p class="muted" style="text-align:center;padding:14px 0">Nenhuma venda na fila ✅</p>';
+  const opsHtml = ops.length
+    ? '<p style="margin-top:12px;font-size:13px" class="muted">'+ops.length+' operação(ões) pendente(s): '
+       +ops.map(o=>o.kind==='customer'?'cadastro de cliente':(o.mkind==='sangria'?'sangria':'suprimento')).join(', ')+'.</p>'
+    : '';
+  const withErr=sales.filter(s=>s.err).length;
+  modal('<div class="m-head"><h3>Fila offline</h3><button data-modal-close>✕</button></div>'
+    +'<div class="m-body" style="max-height:56vh;overflow:auto">'
+      +(withErr?'<p style="font-size:13px;margin:0 0 8px" class="muted">'+withErr+' venda(s) com erro ao sincronizar — verifique o motivo e re-tente, ou descarte se já foi registrada.</p>':'')
+      +'<div style="font-weight:700;margin:2px 0 4px">Vendas ('+sales.length+')</div>'
+      +salesHtml+opsHtml
+      +'<p style="font-size:12px;margin-top:12px" class="muted">'+(online?'Conectado.':'Sem internet — sincroniza sozinho ao reconectar.')
+        +' Descartar apaga a venda deste aparelho e não pode ser desfeito.</p>'
+    +'</div>'
+    +'<div class="m-foot"><button class="btn ghost" data-modal-close>Fechar</button>'
+      +(online&&(sales.length||ops.length)?'<button class="btn" data-onclick="pdvOfflineSyncFromModal()">Sincronizar agora</button>':'')
+    +'</div>');
+};
+window.pdvOfflineSyncFromModal = async function(){
+  toast('Sincronizando…'); await flushOffline(); await flushOps();
+  if(OFFLINE_MEM.length||_opsCount()) pdvOfflineQueueModal(); else { closeModal(); }
+};
+window.pdvOfflineDiscard = async function(client_id){
+  const it=OFFLINE_MEM.find(x=>x.client_id===client_id);
+  const val=it?BRL(_offlineSaleTotal(it)):'';
+  if(!await uiConfirm('Descartar esta venda offline'+(val?(' de '+val):'')+'? Ela não será registrada. Use só se já foi lançada de outra forma.',{danger:true,okText:'Descartar',cancelText:'Manter'})) return;
+  _offlineRemove(client_id); toast('Venda offline descartada'); pdvOfflineQueueModal();
+};
 
 // ===================== VITRINE · 2ª TELA (Customer-Facing Display) =====================
 // Espelha o carrinho em uma segunda tela (tablet ou monitor) por Realtime broadcast.
@@ -1676,17 +1958,28 @@ function pdvOpenModal(){
     +'<div class="pdv-btns"><button class="pdv-btn" id="pdvOpenGo" data-onclick="pdvDoOpen()">Abrir caixa</button>'
     +'<button class="pdv-btn ghost" data-pdv-close>Cancelar</button></div>');
 }
+// Abre uma sessão PROVISÓRIA local (offline). As vendas vão para a fila e o servidor
+// associa cada uma à sessão real do terminal no momento da sincronização.
+function pdvOpenOffline(term,amt){
+  pdvSetTerm(term);
+  PDV.ses={ id:'OFF-SES-'+term, status:'aberto', offline:true, terminal:term, opening:amt, opened_at:new Date().toISOString() };
+  refCachePut('pdv_session:'+term, PDV.ses, true);
+  pdvCloseModal(); renderCaixa(); toast('Caixa aberto offline · sincroniza ao reconectar');
+}
 async function pdvDoOpen(){
   const term=((document.getElementById('pdvTerm')||{}).value||'CAIXA-1').trim()||'CAIXA-1';
   const amt=pdvNum((document.getElementById('pdvOpenAmt')||{}).value);
   const b=document.getElementById('pdvOpenGo');if(b){b.disabled=true;b.textContent='Abrindo...';}
+  if(!navigator.onLine){ pdvOpenOffline(term,amt); return; }
   try{
     const {data,error}=await sb.rpc('pdv_open_session',{p_terminal:term,p_opening:amt});
     if(error)throw error;
     pdvSetTerm(term);
     PDV.ses=data;
+    refCachePut('pdv_session:'+term, PDV.ses, true);
     pdvCloseModal();renderCaixa();pdvStartPickupUpdates();await pdvLoadPickupQueue(true);toast('Caixa aberto ✓');
   }catch(e){
+    if(isNetworkErr(e)){ pdvOpenOffline(term,amt); return; }   // rede caiu no meio → sessão provisória
     console.error(e);toast(pdvErr(e));
     if(b){b.disabled=false;b.textContent='Abrir caixa';}
   }
@@ -1769,22 +2062,34 @@ async function pdvSaveQuickCustomer(){
   if(!pdvValidCpf(cpf)){toast('Informe um CPF válido');return;}
   if(cep.length!==8){toast('Informe o CEP');return;}
   if(!rua||!numero){toast('Informe o endereço e o número');return;}
+  const endereco=[rua+', '+numero,bairro,cidade,'CEP '+cep.slice(0,5)+'-'+cep.slice(5)].filter(Boolean).join(' - ');
+  const regra=(FRETE_RULES||[]).find(x=>String(x.bairro||'').trim().toLowerCase()===bairro.toLowerCase());
+  const custPayload={nome,documento:cpf,telefone:phone,endereco,bairro,frete:+((regra&&regra.valor)||0),obs:'Cadastro rápido pelo PDV'};
+  // Offline: cria um cliente PROVISÓRIO local (sincroniza ao reconectar) e já anexa à venda.
+  // A venda offline referencia o cliente por client_id; o servidor resolve o id real no sync.
+  if(!navigator.onLine){
+    const cid=enqueueOp({kind:'customer', payload:{...custPayload, obs:'Cadastro rápido offline'}});
+    await pdvFinishQuickCustomer({id:null, client_id:cid, name:nome, phone, email:'', cashback:0, offline:true}, 'Cliente salvo offline · sincroniza ao reconectar');
+    return;
+  }
   const b=document.getElementById('pdvQcSave');if(b){b.disabled=true;b.textContent='Salvando...';}
   try{
     const found=await sb.rpc('pdv_find_customer',{p_q:cpf});if(found.error)throw found.error;
     if(Array.isArray(found.data)&&found.data.length){
       await pdvFinishQuickCustomer(found.data[0],'CPF já cadastrado · cliente selecionado');return;
     }
-    const endereco=[rua+', '+numero,bairro,cidade,'CEP '+cep.slice(0,5)+'-'+cep.slice(5)].filter(Boolean).join(' - ');
-    const regra=(FRETE_RULES||[]).find(x=>String(x.bairro||'').trim().toLowerCase()===bairro.toLowerCase());
-    const {data,error}=await sb.rpc('erp_upsert_customer',{p:{nome,documento:cpf,telefone:phone,endereco,bairro,frete:+((regra&&regra.valor)||0),obs:'Cadastro rápido pelo PDV'}});
+    const {data,error}=await sb.rpc('erp_upsert_customer',{p:custPayload});
     if(error)throw error;if(!data||!data.id)throw new Error('Cliente não retornado pelo cadastro');
     await pdvFinishQuickCustomer({id:data.id,name:data.nome||nome,phone:data.telefone||phone,email:data.email||'',cashback:0},'Cliente cadastrado e selecionado');
-  }catch(e){console.error(e);toast(pdvErr(e));if(b){b.disabled=false;b.textContent='Salvar e continuar';}}
+  }catch(e){ if(isNetworkErr(e)){ const cid=enqueueOp({kind:'customer', payload:{...custPayload, obs:'Cadastro rápido offline'}}); await pdvFinishQuickCustomer({id:null, client_id:cid, name:nome, phone, email:'', cashback:0, offline:true}, 'Cliente salvo offline · sincroniza ao reconectar'); return; }
+    console.error(e);toast(pdvErr(e));if(b){b.disabled=false;b.textContent='Salvar e continuar';}}
 }
 async function pdvFinishQuickCustomer(customer,message){
   PDV.cust=customer;PDV.opps=[];
-  await loadCustomers();pdvCloseModal();renderCaixa();pdvLoadOpportunities();toast(message);
+  try{ await loadCustomers(); }catch(e){}   // offline cai no cache; não pode travar o fluxo
+  pdvCloseModal();renderCaixa();
+  if(customer&&customer.id)pdvLoadOpportunities();   // cliente provisório (offline) não tem id/opps ainda
+  toast(message);
   if(PDV_QC_RETURN==='delivery')await pdvDeliveryModal();
 }
 async function pdvDeliveryModal(){
@@ -2376,12 +2681,21 @@ async function pdvDoMove(kind){
   const amt=pdvNum((document.getElementById('pdvMvAmt')||{}).value);
   const why=((document.getElementById('pdvMvWhy')||{}).value||'').trim();
   if(!(amt>0)){toast('Informe um valor maior que zero');return;}
+  // Sessão provisória (aberta offline) não tem gaveta real no servidor → não dá para atribuir.
+  if(PDV.ses&&PDV.ses.offline){ toast('Abra o caixa com internet para registrar sangria/suprimento.', true); return; }
+  // Caixa real aberto mas sem internet: enfileira e sincroniza ao reconectar (idempotente).
+  if(!navigator.onLine){
+    enqueueOp({kind:'movement', mkind:kind, amount:amt, reason:why});
+    pdvCloseModal(); toast((kind==='sangria'?'Sangria':'Suprimento')+' de '+BRL(amt)+' salva offline · sincroniza ao reconectar');
+    return;
+  }
   const b=document.getElementById('pdvMvGo');if(b){b.disabled=true;b.textContent='Gravando...';}
   try{
     const {error}=await sb.rpc('pdv_movement',{p_session:PDV.ses.id,p_kind:kind,p_amount:amt,p_reason:why});
     if(error)throw error;
     pdvCloseModal();toast((kind==='sangria'?'Sangria':'Suprimento')+' de '+BRL(amt)+' registrada ✓');
-  }catch(e){console.error(e);toast(pdvErr(e));if(b){b.disabled=false;b.textContent='Confirmar';}}
+  }catch(e){ if(isNetworkErr(e)){ enqueueOp({kind:'movement', mkind:kind, amount:amt, reason:why}); pdvCloseModal(); toast((kind==='sangria'?'Sangria':'Suprimento')+' de '+BRL(amt)+' salva offline · sincroniza ao reconectar'); return; }
+    console.error(e);toast(pdvErr(e));if(b){b.disabled=false;b.textContent='Confirmar';}}
 }
 
 /* ---------- F7 · finalizar venda ---------- */
@@ -2600,8 +2914,10 @@ async function pdvConfirmSale(){
   const cashApplied=Math.max(0,round2(t.total-others));
   const troco=Math.max(0,round2(cash-cashApplied));
   const pdvPayload={
-    session_id:PDV.ses?PDV.ses.id:null,
-    customer_id:PDV.cust?PDV.cust.id:null,
+    session_id:(PDV.ses && !PDV.ses.offline)?PDV.ses.id:null,   // sessão provisória → o servidor associa à sessão real no sync
+    store_id:CURRENT_STORE||null,                               // loja da venda (admin multi-loja no sync)
+    customer_id:(PDV.cust && !PDV.cust.offline)?PDV.cust.id:null,
+    customer_client_id:(PDV.cust && PDV.cust.offline)?PDV.cust.client_id:null,   // cliente cadastrado offline → resolvido por client_uuid no sync
     items:PDV.items.map(i=>({id:i.id,vid:i.vid||'',qty:i.qty,disc:round2((i.disc||0)+promoDiscFor(i))})),
     discount:t.manual,surcharge:t.sur,cashback:t.cb,
     payments:pays.map(p=>p.m==='crediario'?{m:p.m,v:p.v,parcelas:p.parcelas,venc:p.venc}:{m:p.m,v:p.v}),note:''
@@ -2633,12 +2949,25 @@ async function pdvConfirmSale(){
     }
   }finally{PDV.busy=false;}
 }
+// Baixa o estoque LOCALMENTE após uma venda offline: o catálogo reflete o saldo e evita
+// vender além do que há. O servidor é a fonte da verdade e reconcilia o estoque no sync.
+function pdvApplyLocalStock(items){
+  try{
+    (items||[]).forEach(it=>{
+      const p=(PRODUCTS||[]).find(x=>x.id===it.id);
+      if(p && p.track_stock!==false && p.estoque!=null) p.estoque = Math.max(0, (+p.estoque||0) - (+it.qty||0));
+    });
+    refCachePut('products:'+(CURRENT_STORE||'all'), PRODUCTS);   // persiste o saldo p/ próximo boot offline
+    buildPdvCatalog();
+  }catch(e){ console.warn('pdvApplyLocalStock',e); }
+}
 function pdvOfflineFinish(t,pays,troco){
   const provisional={num:'OFF-'+Date.now().toString(36).slice(-6).toUpperCase(),
     subtotal:t.sub,discount:round2((t.idisc||0)+(t.promo||0)+(t.manual||0)+(t.cb||0)),
     member_disc:t.mdisc||0,cashback_used:t.cb||0,surcharge:t.sur||0,
     total:t.total,change:troco,cashback_earned:0,cashback_balance:0,offline:true};
   PDV.lastSale={res:provisional,items:PDV.items.slice(),pays:pays,when:new Date(),customerId:(PDV.cust&&PDV.cust.id)||null};
+  pdvApplyLocalStock(PDV.lastSale.items);
   PDV._lastPhone=(PDV.cust&&PDV.cust.phone)||'';
   try{ pdvResetDraft(); }catch(err){ console.error('pdvResetDraft:',err); }
   try{ pdvReceiptModal(PDV.lastSale); }catch(err){ console.error('pdvReceiptModal:',err); toast('Venda salva, mas não consegui exibir o recibo.'); }
@@ -2660,8 +2989,18 @@ function pdvSaleIsAnonymous(sale){
   const name=String(r.customer||r.cliente||'').trim().toLocaleLowerCase('pt-BR');
   return !name||['consumidor','cliente','sem cadastro','—','-'].includes(name);
 }
+// Gera o QR LOCALMENTE (lib/qrcode.js, já pré-cacheado) → funciona offline e não depende
+// de serviço externo. Cai no serviço online só se a lib falhar por algum motivo.
+function onpdvQrDataUrl(text, cell, margin){
+  try{
+    if(typeof qrcode!=='function') return '';
+    const q=qrcode(0,'M'); q.addData(String(text||'')); q.make();
+    return q.createDataURL(cell||4, margin==null?8:margin);
+  }catch(e){ return ''; }
+}
 function pdvPortalQrImage(){
-  return 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=4&data='+encodeURIComponent(ONPDV_CUSTOMER_PORTAL_URL);
+  return onpdvQrDataUrl(ONPDV_CUSTOMER_PORTAL_URL,4,4)
+    || ('https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=4&data='+encodeURIComponent(ONPDV_CUSTOMER_PORTAL_URL));
 }
 function pdvReceiptHtml(sale){
   const r=sale.res,d=sale.when||new Date(),p=n=>String(n).padStart(2,'0');
@@ -3255,11 +3594,19 @@ async function loadCaixa(){
     ]);
     if(ses.error)throw ses.error;
     PDV.ses=ses.data||null;
+    refCachePut('pdv_session:'+PDV.terminal, PDV.ses||null, true);   // espelha o estado real (aberto/fechado)
     PDV.mpct=Number(pct&&pct.data)||0;
     if(!terms.error){PDV.terminals=Array.isArray(terms.data)?terms.data:[];
       if(!PDV.ses&&PDV.terminals.length&&!PDV.terminals.some(t=>t.code===PDV.terminal&&t.active))pdvSetTerm((PDV.terminals.find(t=>t.active)||{}).code||PDV.terminal);
       applyPaperVar();}
-  }catch(e){console.error(e);toast(pdvErr(e));}
+  }catch(e){
+    if(isNetworkErr(e)){
+      // Offline: restaura a última sessão aberta conhecida (real ou provisória) do cache,
+      // para o caixa continuar vendendo após um reload sem internet.
+      const cs = await refCacheGet('pdv_session:'+PDV.terminal);
+      if(cs && cs.status==='aberto') PDV.ses=cs;
+    }else{ console.error(e);toast(pdvErr(e)); }
+  }
   renderCaixa();
   if(navigator.onLine&&typeof pdvOfflineCacheState==='function')pdvOfflineCacheState();
   if(navigator.onLine&&typeof pdvOfflineSync==='function')pdvOfflineSync();
@@ -4286,7 +4633,10 @@ async function loadDash(){
 
 // ======================= EMPRESA =======================
 async function loadCompany(){
-  const { data } = await sb.from('company_settings').select('*').eq('id',1).maybeSingle();
+  const { data } = await refetch('company', async ()=>{
+    const r = await sb.from('company_settings').select('*').eq('id',1).maybeSingle(); if(r.error) throw r.error;
+    return r.data || { nome:'Minha Loja' };
+  }, true);
   COMPANY = data||{ nome:'Minha Loja' };
   $('#coNome').value=COMPANY.nome||''; $('#coCnpj').value=COMPANY.cnpj||'';
   $('#coFone').value=COMPANY.telefone||''; $('#coEnd').value=COMPANY.endereco||'';
@@ -4329,7 +4679,10 @@ $('#btnSaveCompany').onclick = async ()=>{
 };
 // ---- frete por bairro ----
 async function loadFreteRules(){
-  try{ const { data } = await sb.rpc('erp_frete_bairros'); FRETE_RULES = data||[]; }catch(e){ FRETE_RULES=[]; }
+  try{ const { data, error } = await sb.rpc('erp_frete_bairros'); if(error) throw error;
+    FRETE_RULES = data||[]; refCachePut('frete_rules', FRETE_RULES, true);
+  }catch(e){ const c = isNetworkErr(e) ? await refCacheGet('frete_rules') : undefined;
+    FRETE_RULES = Array.isArray(c) ? c : []; }
   renderFrete();
 }
 function renderFrete(){
@@ -5187,8 +5540,8 @@ window.promoDelete=async id=>{
 // ======================= CAIXA / GAVETA =======================
 let CASH = null;
 async function refreshCash(render){
-  const { data } = await sb.rpc('erp_cash_current');
-  CASH = data || null;
+  try{ const { data, error } = await sb.rpc('erp_cash_current'); if(error) throw error; CASH = data || null; }
+  catch(e){ if(!isNetworkErr(e)) console.warn('refreshCash',e); /* offline: mantém o último estado conhecido */ }
   const chip=$('#cashChip');
   if(chip) chip.innerHTML = CASH ? '<span class="chip ok">💰 Caixa aberto</span>' : '<span class="chip warn">Caixa fechado</span>';
   if(render) renderCash();
@@ -6844,7 +7197,8 @@ window.delivGuidePrint=async()=>{
 window.delivGuide=async id=>{
   const { data:r, error } = await sb.from('v_delivery_queue').select('*').eq('id',id).maybeSingle();
   if(error||!r){ toast('Entrega não encontrada.',true); return; }
-  const qr='https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data='+encodeURIComponent(id);
+  const qr=onpdvQrDataUrl(id,5,8)
+    || ('https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data='+encodeURIComponent(id));
   window._delivGuide={ r:r, qr:qr, qrData:id };
 
   const corpo='<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">'

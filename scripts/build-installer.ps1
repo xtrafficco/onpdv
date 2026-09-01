@@ -1,5 +1,5 @@
 param(
-  [string]$Release = '2026.08.25-v35'
+  [string]$Release = '2026.09.01-v47'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,7 +38,7 @@ foreach ($taskDirectory in $taskDirectories) {
 $taskFiles = @(
   'app.webmanifest', 'cliente.html', 'cliente.webmanifest', 'entregador.html',
   'icon-192.png', 'icon-512.png', 'icon-maskable.png', 'index.html',
-  'manifest.webmanifest', 'sw.js', 'vitrine.html', 'vitrine.webmanifest'
+  'manifest.webmanifest', 'sw.js', 'version.json', 'vitrine.html', 'vitrine.webmanifest'
 )
 foreach ($taskFile in $taskFiles) {
   Copy-Item -LiteralPath (Join-Path $taskRoot $taskFile) -Destination (Join-Path $taskStage $taskFile) -Force
@@ -82,7 +82,9 @@ Move-Item -LiteralPath $taskNewInstaller -Destination $taskInstaller -Force
 
 $taskZipHash = (Get-FileHash -LiteralPath $taskSourceZip -Algorithm SHA256).Hash
 $taskEmbeddedBytes = [Convert]::FromBase64String((([IO.File]::ReadAllText($taskInstaller).Substring(([IO.File]::ReadAllText($taskInstaller).LastIndexOf($taskMarker) + $taskMarker.Length))) -replace '\s',''))
-$taskEmbeddedHash = [BitConverter]::ToString([Security.Cryptography.SHA256]::HashData($taskEmbeddedBytes)).Replace('-', '')
+$taskSha = [Security.Cryptography.SHA256]::Create()
+try { $taskEmbeddedHash = [BitConverter]::ToString($taskSha.ComputeHash($taskEmbeddedBytes)).Replace('-', '') }
+finally { $taskSha.Dispose() }
 if ($taskEmbeddedHash -ne $taskZipHash) {
   throw 'O pacote embutido no instalador difere do ZIP publicado.'
 }

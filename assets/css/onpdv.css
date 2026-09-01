@@ -393,6 +393,16 @@ body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 .pdv-cons{font-size:19px;font-weight:800;letter-spacing:.3px;margin-bottom:6px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pdv-cons b{color:#ffd76a}
+/* Pílula de estado da conexão no cabeçalho do caixa (Online/Offline/fila pendente) */
+.pdv-net{order:2;margin-left:auto;align-self:flex-start;flex:none;cursor:pointer;user-select:none;
+  font-size:13px;font-weight:800;letter-spacing:.3px;line-height:1;white-space:nowrap;
+  padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.25);
+  background:rgba(255,255,255,.10);color:#fff;transition:background .2s,border-color .2s}
+.pdv-net.online{background:rgba(46,204,113,.18);border-color:rgba(46,204,113,.55);color:#b8f5cf}
+.pdv-net.pending{background:rgba(243,156,18,.20);border-color:rgba(243,156,18,.65);color:#ffe0a3}
+.pdv-net.off{background:rgba(231,76,60,.22);border-color:rgba(231,76,60,.7);color:#ffc9c2;
+  animation:pdvNetPulse 1.6s ease-in-out infinite}
+@keyframes pdvNetPulse{0%,100%{opacity:1}50%{opacity:.6}}
 .pdv-row{display:flex;gap:var(--p-gap)}
 .pdv-code-col{flex:0 0 calc(var(--p-side) - var(--p-pad) - var(--p-gap))!important;min-width:0}
 .pdv-lbl{font-size:13px;opacity:.9;margin-bottom:3px;display:block}
