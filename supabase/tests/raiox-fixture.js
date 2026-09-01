@@ -71,7 +71,16 @@
       meta: {
         empresa: 'PETVILLE RAÇÕES E BAZAR LTDA',
         lojas: LOJAS.map(function (n, i) { return { id: 'id-' + i, nome: n, matriz: i === 0 }; }),
-        cmv_mes: [{ ym: '2026-06', cmv: 3400, rec_com_custo: 5000, rec_itens: 6000 }],
+        margem: {
+          // 2026-06 tem medicao item a item, mas cobrindo so R$5.000 de um mes
+          // de ~R$47.000: cobertura baixa demais, deve ser descartada.
+          itens_mes: [{ ym: '2026-06', receita: 5000, cmv: 3400, receita_itens: 6000 }],
+          // 2026-04 tem giro x custo cobrindo o mes inteiro: deve prevalecer.
+          historico_mes: [{ ym: '2026-04', receita: 46800, cmv: 30420 }],
+          catalogo: { pct: 37.8, produtos: 1721, sem_custo: 16 },
+          global: { pct: 33.0, receita: 157000, cmv: 105190 },
+          receita_conhecida: 218000
+        },
         devolucoes: [],
         estoque: LOJAS.map(function (n, i) { return { loja: n, valor: 30000 - i * 9000, unidades: 800 - i * 200 }; }),
         taxa_cartao: { credito: 4.12, debito: 1.44, amostras: 320 },

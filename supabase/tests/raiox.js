@@ -27,7 +27,10 @@ const LOJAS = payload._lojas;
 let d = E.fromDataset(payload, { incluirHistorico: false });
 assert.strictEqual(d.contas.length, contas.length, 'todas as contas devem ser lidas');
 assert.ok(d.mesesReceita.indexOf('2026-01') < 0, 'histórico desligado não deve criar mês');
-assert.ok(d.medido.margem > 0.3 && d.medido.margem < 0.35, 'margem medida deve sair do cmv_mes');
+assert.ok(Math.abs(d.margem.global.pct - 0.33) < 1e-9, 'margem global medida deve ser lida do meta');
+assert.ok(Math.abs(d.margem.catalogo.pct - 0.378) < 1e-9, 'margem de catálogo deve ser lida do meta');
+assert.strictEqual(d.margem.porMes['2026-04'].fonte, 'historico');
+assert.strictEqual(d.margem.porMes['2026-06'].fonte, 'vendas');
 
 const comHist = E.fromDataset(payload, { incluirHistorico: true });
 assert.ok(comHist.mesesReceita.indexOf('2026-01') > -1, 'histórico ligado deve criar o mês');
@@ -96,6 +99,45 @@ A.findings.forEach(f => {
   assert.ok(f.tit && f.txt, 'achado precisa de título e texto');
 });
 
+/* ---- 3b. margem: medida pelo sistema, nunca digitada ---- */
+// 2026-04: giro x custo cobre 75% do mes -> a medicao do proprio mes vale
+const mg04 = A.margemMes['2026-04'];
+assert.strictEqual(mg04.fonte, 'historico', 'mês com boa cobertura usa a própria medição');
+assert.ok(Math.abs(mg04.pct - (1 - 30420 / 46800)) < 1e-9, 'margem do mês vem do CMV medido');
+
+// 2026-06: itens cobrem so ~8% do mes -> amostra pequena, cai na medicao global
+const mg06 = A.margemMes['2026-06'];
+assert.strictEqual(mg06.fonte, 'global', 'amostra pequena não pode ditar a margem do mês');
+assert.ok(Math.abs(mg06.pct - 0.33) < 1e-9);
+
+// meses sem medicao propria tambem caem na global — nunca na premissa manual
+assert.strictEqual(A.margemMes['2026-03'].fonte, 'global');
+assert.strictEqual(A.margemMes['2026-05'].fonte, 'global');
+assert.ok(A.margem.medida, 'com dados no sistema a margem é medida, não informada');
+assert.ok(!('manual' in A.margem.fontes), 'nenhum mês pode cair na premissa manual aqui');
+
+// o CMV do periodo e a soma dos meses, nao receita x margem media
+const cmvEsperado = A.meses.reduce((s, k) => s + (A.rec.mes[k] || 0) * (1 - A.margemMes[k].pct), 0);
+assert.ok(Math.abs(A.dre.cmv - cmvEsperado) < 0.01, 'CMV do período é a soma dos meses');
+assert.ok(Math.abs(A.margem.pct - (1 - A.dre.cmv / A.rec.total)) < 1e-9, 'margem efetiva bate com o CMV');
+// a margem efetiva fica entre a do mes medido e a global, nunca no default de 32%
+assert.ok(A.margem.pct > 0.33 && A.margem.pct < 0.35, 'margem efetiva mistura as fontes: ' + A.margem.pct);
+
+// substituicao manual so vale quando explicitamente ligada
+const Aman = E.analyze(d, '2026-03', '2026-06', Object.assign({}, E.CFG_DEFAULT, { margem: 20, margemManual: true }));
+assert.strictEqual(Aman.margemMes['2026-04'].fonte, 'manual', 'override manual vence tudo');
+assert.ok(Math.abs(Aman.margem.pct - 0.20) < 1e-9);
+assert.ok(!Aman.margem.medida, 'com override o relatório declara margem informada');
+// e sem o flag, mudar o campo manual nao muda nada
+const Aign = E.analyze(d, '2026-03', '2026-06', Object.assign({}, E.CFG_DEFAULT, { margem: 20 }));
+assert.ok(Math.abs(Aign.margem.pct - A.margem.pct) < 1e-9, 'margem digitada é ignorada sem o override');
+
+// sem nenhuma medicao no banco, cai na premissa — e diz que caiu
+const semMedicao = E.fromDataset({ contas: payload.contas, receitas: payload.receitas, meta: {} }, {});
+const Asem = E.analyze(semMedicao, '2026-03', '2026-06', E.CFG_DEFAULT);
+assert.strictEqual(Asem.margemMes['2026-04'].fonte, 'manual');
+assert.ok(!Asem.margem.medida);
+
 /* ---- 4. renderização das 11 abas ---- */
 const views = sandbox.ONPDV_RAIOX._engine.renderAll(payload, { incluirHistorico: false });
 ['visao', 'dre', 'lojas', 'compras', 'fornec', 'pagar', 'atrasos', 'diag', 'plano', 'relatorio', 'config']
@@ -106,6 +148,10 @@ const views = sandbox.ONPDV_RAIOX._engine.renderAll(payload, { incluirHistorico:
     assert.ok(html.indexOf('NaN') < 0, `aba ${v} não pode conter "NaN"`);
     assert.ok(html.indexOf('[object Object]') < 0, `aba ${v} não pode conter "[object Object]"`);
   });
+assert.ok(views.dre.indexOf('margem medida pelo sistema') > -1, 'a DRE declara que a margem é medida');
+assert.ok(views.config.indexOf('Margem bruta — medida pelo sistema') > -1, 'Premissas mostra a margem medida');
+assert.ok(views.config.indexOf('id="rxcfg_margem"') > -1, 'o override manual continua disponível');
+assert.ok(views.compras.indexOf('medida pelo sistema') > -1, 'a sensibilidade destaca a margem medida');
 assert.ok(views.relatorio.indexOf('Capítulo 14') > -1, 'o relatório completo tem 14 capítulos');
 assert.ok(views.relatorio.indexOf('rx-cover') > -1, 'o relatório tem capa');
 
@@ -125,6 +171,7 @@ console.log('Raio-X Financeiro: todos os testes passaram.');
 console.log('  receita            ', E.fm(A.rec.total));
 console.log('  saídas             ', E.fm(A.desp.total));
 console.log('  compras            ', E.fm(A.dre.compras));
-console.log('  CMV estimado       ', E.fm(A.dre.cmv));
+console.log('  CMV                ', E.fm(A.dre.cmv));
+console.log('  margem em uso      ', E.pc(A.margem.pct), '(' + A.margem.fonte + ')');
 console.log('  resultado ajustado ', E.fm(A.dre.resultadoAjust));
 console.log('  achados            ', A.findings.length);

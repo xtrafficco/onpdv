@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.01-v49",
+  "version": "2026.09.01-v50",
   "installer": "/downloads/onpdv-caixa.bat",
-  "notes": "Raio-X Financeiro: nova aba de relatório gerencial em 14 capítulos (DRE, resultado por loja, compras × CMV, curva ABC, atrasos e juros, projeção de caixa em 13 semanas, diagnóstico e plano de ação), alimentada direto pelos lançamentos do sistema."
+  "notes": "Raio-X Financeiro: a margem bruta passa a ser medida pelo próprio sistema (itens vendidos com custo, ou giro × custo cadastrado) em vez de digitada. O CMV é apurado mês a mês pela melhor fonte disponível, e cada mês declara de onde veio a margem."
 }

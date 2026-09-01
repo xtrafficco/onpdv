@@ -121,20 +121,59 @@ function fromDataset(payload, opts){
   contas.forEach(function(x){ if(x.ym) mesesC[x.ym]=1; });
 
   var meta=raw.meta||{};
-  var cmvMes={}, cmvTot=0, recCusto=0;
-  (meta.cmv_mes||[]).forEach(function(o){
-    cmvMes[o.ym]={cmv:toNum(o.cmv), rec:toNum(o.rec_com_custo), recItens:toNum(o.rec_itens)};
-    cmvTot+=toNum(o.cmv); recCusto+=toNum(o.rec_com_custo);
-  });
 
   return {
     contas:contas, receitas:receitas,
     mesesReceita:Object.keys(mesesR).sort(), mesesContas:Object.keys(mesesC).sort(),
-    meta:meta, cmvMes:cmvMes,
-    medido:{ cmv:cmvTot, recComCusto:recCusto,
-             margem: recCusto>0 ? (1-cmvTot/recCusto) : null },
+    meta:meta, margem:lerMargem(meta),
     geradoEm: raw.gerado_em ? new Date(raw.gerado_em) : new Date()
   };
+}
+
+/* Margem bruta medida pelo sistema, em tres fontes de qualidade decrescente.
+   Aqui so organizamos as medicoes; qual delas vale em cada mes e decidido em
+   `margemDoMes`, que precisa saber a receita do mes para julgar a cobertura. */
+var FONTES={
+  vendas:    {n:'medida item a item nas vendas'},
+  historico: {n:'medida pelo giro de cada produto x o custo cadastrado'},
+  catalogo:  {n:'calculada pelo cadastro de produtos'},
+  manual:    {n:'informada manualmente'}
+};
+function fonteLabel(f){
+  if(f==='global') return 'medida pelo sistema no conjunto das vendas custeadas';
+  return (FONTES[f]||{}).n || f;
+}
+function lerMargem(meta){
+  var M=(meta&&meta.margem)||{}, porMes={};
+  (M.historico_mes||[]).forEach(function(o){
+    var r=toNum(o.receita); if(r<=0) return;
+    porMes[o.ym]={pct:1-toNum(o.cmv)/r, fonte:'historico', receita:r, cmv:toNum(o.cmv)};
+  });
+  /* item a item e a fonte mais forte: sobrescreve o historico do mesmo mes */
+  (M.itens_mes||[]).forEach(function(o){
+    var r=toNum(o.receita); if(r<=0) return;
+    porMes[o.ym]={pct:1-toNum(o.cmv)/r, fonte:'vendas', receita:r, cmv:toNum(o.cmv)};
+  });
+  var g=M.global||{}, c=M.catalogo||{};
+  return {
+    porMes:porMes,
+    global: (g.pct!=null) ? {pct:g.pct/100, receita:toNum(g.receita), cmv:toNum(g.cmv)} : null,
+    catalogo: (c.pct!=null) ? {pct:c.pct/100, produtos:c.produtos||0, semCusto:c.sem_custo||0} : null,
+    receitaConhecida: toNum(M.receita_conhecida)
+  };
+}
+/* Cobertura minima para a medicao do proprio mes valer mais que a medicao
+   global: abaixo disso a amostra e pequena demais e distorce o CMV. */
+var COBERTURA_MIN=0.25;
+function margemDoMes(R, k){
+  var M=R.margemSrc||{porMes:{}}, recMes=R.rec.mes[k]||0;
+  if(R.cfg.margemManual) return {pct:R.cfg.margem/100, fonte:'manual', cobertura:null};
+  var c=M.porMes[k];
+  if(c && recMes>0 && c.receita>=recMes*COBERTURA_MIN)
+    return {pct:c.pct, fonte:c.fonte, cobertura:c.receita/recMes};
+  if(M.global) return {pct:M.global.pct, fonte:'global', cobertura:null};
+  if(M.catalogo) return {pct:M.catalogo.pct, fonte:'catalogo', cobertura:null};
+  return {pct:R.cfg.margem/100, fonte:'manual', cobertura:null};
 }
 
 /* ====================== 3. MOTOR DE ANÁLISE ====================== */
@@ -145,7 +184,7 @@ function analyze(data, de, ate, cfg){
   cfg=Object.assign({},CFG_DEFAULT,cfg||{});
   var meses=rangeM(de,ate);
   var inR=function(k){ return k && k>=de && k<=ate; };
-  var R={cfg:cfg, de:de, ate:ate, meses:meses, meta:data.meta||{}, medido:data.medido||{}};
+  var R={cfg:cfg, de:de, ate:ate, meses:meses, meta:data.meta||{}, margemSrc:data.margem||{porMes:{}}};
 
   /* --- receita --- */
   var rec=data.receitas.filter(function(x){ return inR(x.ym); });
@@ -201,9 +240,31 @@ function analyze(data, de, ate, cfg){
   var taxa = mix.cred*cfg.txCred/100 + mix.deb*cfg.txDeb/100
            + mix.cart*((cfg.txCred+cfg.txDeb)/2)/100;
 
+  /* --- margem bruta, mes a mes, medida pelo sistema ---
+     O CMV nao sai mais de um percentual unico digitado a mao: cada mes usa a
+     melhor medicao disponivel (itens vendidos > giro x custo > catalogo) e o
+     total do periodo e a soma dos meses, nao a receita vezes uma media. */
+  R.margemMes={};
+  meses.forEach(function(k){ R.margemMes[k]=margemDoMes(R,k); });
+  var cmv=0;
+  meses.forEach(function(k){ cmv+=(R.rec.mes[k]||0)*(1-R.margemMes[k].pct); });
+  R.margem={
+    pct: R.rec.total>0 ? 1-cmv/R.rec.total
+       : (R.margemSrc.global? R.margemSrc.global.pct : cfg.margem/100),
+    fontes:(function(){
+      var f={}; meses.forEach(function(k){
+        var v=R.rec.mes[k]||0; if(v) f[R.margemMes[k].fonte]=(f[R.margemMes[k].fonte]||0)+v; });
+      return f;
+    })()
+  };
+  R.margem.fonte=Object.keys(R.margem.fontes).sort(function(a,b){
+    return R.margem.fontes[b]-R.margem.fontes[a]; })[0] || 'manual';
+  R.margem.medida = R.margem.fonte!=='manual';
+  R.margem.cobertura = (R.margemSrc.receitaConhecida>0 && R.margemSrc.global)
+    ? R.margemSrc.global.receita/R.margemSrc.receitaConhecida : null;
+
   /* --- DRE --- */
   var compras=R.desp.bloco.FORNECEDOR||0;
-  var cmv=R.rec.total*(1-cfg.margem/100);
   var d=R.desp.bloco;
   R.dre={
     receita:R.rec.total, taxaCartao:taxa, liquida:R.rec.total-taxa,
@@ -219,7 +280,7 @@ function analyze(data, de, ate, cfg){
   R.dre.resultadoAjust=R.dre.resultado-R.dre.gapImposto;
   R.dre.caixa=R.rec.total-R.desp.total;
   R.dre.varEstoque=compras-cmv;
-  R.dre.mcPct=R.rec.total? (R.rec.total-taxa-cmv)/R.rec.total : cfg.margem/100;
+  R.dre.mcPct=R.rec.total? (R.rec.total-taxa-cmv)/R.rec.total : R.margem.pct;
   R.dre.pontoEquilibrio=R.dre.mcPct>0 ? R.dre.despOper/R.dre.mcPct : null;
   R.dre.pontoEquilibrioMes=R.dre.pontoEquilibrio!=null ? R.dre.pontoEquilibrio/Math.max(1,R.nMesesRec) : null;
 
@@ -227,10 +288,12 @@ function analyze(data, de, ate, cfg){
   R.dreMes=meses.map(function(k){
     var rc=R.rec.mes[k]||0;
     var bm=function(b){ return (R.desp.blocoMes[b]||{})[k]||0; };
-    var cmvK=rc*(1-cfg.margem/100);
+    var mg=R.margemMes[k]||{pct:R.margem.pct,fonte:'manual'};
+    var cmvK=rc*(1-mg.pct);
     var mixK=R.rec.total? taxa/R.rec.total*rc : 0;
     var oper=bm('FOLHA')+bm('OCUPACAO')+bm('ADM')+bm('FINANC')+bm('IMPOSTO')+bm('SOCIOS')+bm('OUTROS')+bm('INVEST');
     return {k:k, rec:rc, compras:bm('FORNECEDOR'), cmv:cmvK, taxa:mixK,
+      marg:mg.pct, margFonte:mg.fonte, margCob:mg.cobertura,
       folha:bm('FOLHA'), ocup:bm('OCUPACAO'), adm:bm('ADM'), fin:bm('FINANC'),
       imp:bm('IMPOSTO'), soc:bm('SOCIOS'), outros:bm('OUTROS')+bm('INVEST'),
       oper:oper, result:rc-mixK-cmvK-oper, caixa:rc-(R.desp.mes[k]||0),
@@ -448,7 +511,7 @@ function deep(R, data){
      ref:'≥ 1,10', s: st(d.pontoEquilibrioMes? (Rt/m)/d.pontoEquilibrioMes:null, 1.1, 1.0),
      obs:'Abaixo de 1,00 a operação não cobre os próprios custos.'},
     {g:'Mercadoria', n:'Compras sobre receita', v: Rt? d.compras/Rt : null, f:'pct',
-     ref:'≈ '+pc(1-cfg.margem/100,0)+' (igual ao CMV)', s:'na',
+     ref:'≈ '+pc(1-R.margem.pct,0)+' (igual ao CMV)', s:'na',
      obs:'Muito abaixo do CMV significa estoque encolhendo; muito acima, dinheiro parado.'},
     {g:'Mercadoria', n:'Variação de estoque no período', v: d.varEstoque, f:'money',
      ref:'próximo de zero', s: Math.abs(d.varEstoque)<Rt*.02?'ok':(d.varEstoque<0?'ru':'at'),
@@ -529,8 +592,8 @@ function findings(R){
     if(ve < -rec*0.02){
       push('c','📉','As compras estão abaixo do que a venda consome — o estoque está sendo consumido',
         fm(Math.abs(ve))+' a menos em '+m+' meses',
-        'Com margem de '+pc(R.cfg.margem/100,0)+', vender '+fm(rec)+' consome cerca de '+fm(d.cmv)+' de mercadoria a preço de custo. Foram comprados '+fm(d.compras)+'. A diferença de '+fm(Math.abs(ve))+' saiu da prateleira e não voltou. É por isso que se compra o mês inteiro, há boleto todo dia e mesmo assim falta produto: o dinheiro da compra está pagando folha e conta fixa, não repondo mercadoria.',
-        'Duas conferências antes de qualquer decisão: (1) rode o inventário no ONPDV e confirme se o estoque caiu mesmo esse valor — se não caiu, existe perda, quebra ou furo de registro; (2) confirme a margem real conferindo custo × preço de venda dos 20 itens que mais saem. A margem é a premissa que sustenta todo este relatório.', 0);
+        'Com margem bruta de '+pc(R.margem.pct,0)+' ('+fonteLabel(R.margem.fonte)+'), vender '+fm(rec)+' consome cerca de '+fm(d.cmv)+' de mercadoria a preço de custo. Foram comprados '+fm(d.compras)+'. A diferença de '+fm(Math.abs(ve))+' saiu da prateleira e não voltou. É por isso que se compra o mês inteiro, há boleto todo dia e mesmo assim falta produto: o dinheiro da compra está pagando folha e conta fixa, não repondo mercadoria.',
+        'Duas conferências antes de qualquer decisão: (1) rode o inventário no ONPDV e confirme se o estoque caiu mesmo esse valor — se não caiu, existe perda, quebra ou furo de registro; (2) confira o custo cadastrado dos 20 itens que mais saem — é dele que o sistema tira a margem que sustenta esta conta.', 0);
     } else if(ve > rec*0.05){
       push('a','📦','As compras superam o giro — dinheiro parado em estoque', fm(ve)+' a mais em '+m+' meses',
         'Foram comprados '+fm(d.compras)+' contra um consumo estimado de '+fm(d.cmv)+'. Sobraram '+fm(ve)+' virando prateleira. Estoque parado é caixa preso: o boleto vence em 28 dias, o produto sai em 90.',
@@ -564,7 +627,7 @@ function findings(R){
       push('a','🏪','A loja '+L.loja+' fecha no vermelho', fm(L.result)+' no período',
         'Faturou '+fm(L.rec)+' e consumiu '+fm(L.custo)+' entre compras, folha, aluguel e rateios'+(L.hub?'. Atenção: esta é a loja que compra para as outras, então ela carrega o custo central da operação — já foram descontados '+fm(Math.abs(L.aj))+' de mercadoria transferida':'')+'.',
         (L.hub? 'Antes de concluir que ela dá prejuízo, separe o que é custo dela do que é custo da empresa inteira (administrativo, compras, entregas). Provavelmente parte disso deveria ser rateada para as outras lojas.'
-              : 'Compare custo fixo (aluguel + folha) contra a margem bruta que ela gera: '+fm(L.rec*R.cfg.margem/100)+' por período. Se o fixo passa disso, a loja não se paga nem vendendo bem.'), 0);
+              : 'Compare custo fixo (aluguel + folha) contra a margem bruta que ela gera: '+fm(L.rec*R.margem.pct)+' por período. Se o fixo passa disso, a loja não se paga nem vendendo bem.'), 0);
   });
   if(R.aberto.vencido>0){
     push(R.aberto.vencido > rec/m*0.1 ? 'c':'a','🔔','Tem boleto vencido em aberto agora', fm(R.aberto.vencido),
@@ -743,29 +806,58 @@ function frase(){
 
 /* Card exclusivo da versão integrada: o que o ONPDV mediu de verdade. */
 function cardMedido(){
-  var med=A.medido||{}, est=A.estoqueMedido||{}, tx=(A.meta.taxa_cartao)||{};
-  var cob = (A.rec.total>0 && med.recComCusto) ? med.recComCusto/A.rec.total : 0;
+  var M=A.margemSrc||{}, est=A.estoqueMedido||{}, tx=(A.meta.taxa_cartao)||{};
   var linhas=[];
-  linhas.push('<tr><td>Margem bruta medida item a item</td><td class="rx-num">'+(med.margem!=null?pc(med.margem):'—')
-    +'</td><td class="rx-num">'+pc(cob)+' da receita</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">'
-    +(med.margem==null?'Nenhuma venda do período tem custo cadastrado no item.'
-      : cob<0.2 ? 'Cobertura baixa: use como indício, não como premissa. Cadastre o custo dos produtos para o relatório parar de estimar.'
-      : 'Cobertura suficiente para substituir a estimativa de margem.')+'</td></tr>');
+
+  linhas.push('<tr><td><b>Margem bruta em uso no relatório</b></td>'
+    +'<td class="rx-num"><b>'+pc(A.margem.pct)+'</b></td>'
+    +'<td class="rx-num">'+(A.margem.cobertura!=null?pc(A.margem.cobertura)+' da receita conhecida':'—')+'</td>'
+    +'<td style="text-align:left;white-space:normal;color:var(--rx-tx2)">'+esc(fonteLabel(A.margem.fonte))
+    +(A.margem.medida?'. É este número que define o CMV, o lucro bruto e a variação de estoque.'
+                     :'. Nenhuma venda custeada foi encontrada, então o relatório caiu na premissa manual.')
+    +'</td></tr>');
+
+  if(M.global) linhas.push('<tr><td>→ medida no conjunto das vendas custeadas</td><td class="rx-num">'
+    +pc(M.global.pct)+'</td><td class="rx-num">'+fm(M.global.receita)+'</td>'
+    +'<td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Receita com custo conhecido, ponderada pelo que realmente saiu da prateleira. CMV apurado: '+fm(M.global.cmv)+'.</td></tr>');
+
+  if(M.catalogo) linhas.push('<tr><td>→ calculada só pelo cadastro (preço × custo)</td><td class="rx-num">'
+    +pc(M.catalogo.pct)+'</td><td class="rx-num">'+nf(M.catalogo.produtos)+' produtos</td>'
+    +'<td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Não é ponderada por venda: um item caro que quase não gira pesa igual à ração do dia a dia. Serve de referência, não de base.</td></tr>');
+
   linhas.push('<tr><td>Estoque a custo, hoje</td><td class="rx-num">'+fm(est.total||0)+'</td><td class="rx-num">'
     +nf(est.unidades||0)+' un.</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">'
-    +(est.meses!=null? 'Equivale a '+est.meses.toFixed(1).replace('.',',')+' meses do consumo estimado. A planilha nunca soube esse número: aqui ele vem do saldo por loja × custo cadastrado.' : 'Depende do custo cadastrado nos produtos.')
+    +(est.meses!=null? 'Equivale a '+est.meses.toFixed(1).replace('.',',')+' meses do consumo do período. Vem do saldo por loja × custo cadastrado.' : 'Depende do custo cadastrado nos produtos.')
     +'</td></tr>');
+
   linhas.push('<tr><td>Taxa real da maquininha (Mercado Pago)</td><td class="rx-num">'
     +(tx.credito!=null?pc(tx.credito/100,2):'—')+'</td><td class="rx-num">'+(tx.debito!=null?pc(tx.debito/100,2):'—')
     +'</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">'
     +(tx.amostras? nf(tx.amostras)+' liquidações conciliadas. Crédito · débito.' : 'Sem liquidações conciliadas ainda.')+'</td></tr>');
-  var pSem=(A.meta.contagem||{}).produtos_sem_custo;
-  if(pSem) linhas.push('<tr><td>Produtos ativos sem custo cadastrado</td><td class="rx-num rx-neg">'+nf(pSem)
-    +'</td><td class="rx-num">—</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Cada produto sem custo obriga o relatório a estimar em vez de medir.</td></tr>');
 
-  return card('🔬 O que o sistema mediu (e a planilha não media)',
-    'Estes números vêm do próprio ONPDV. Onde a medição é confiável, ela substitui a premissa — o botão fica na aba Premissas.',
-    tbl(['Indicador','Valor','Base','Leitura'],linhas));
+  var pSem=(M.catalogo&&M.catalogo.semCusto)||0;
+  if(pSem) linhas.push('<tr><td>Produtos ativos sem custo cadastrado</td><td class="rx-num rx-neg">'+nf(pSem)
+    +'</td><td class="rx-num">—</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Ficam de fora da medição de margem. Cada um que entra deixa o CMV mais exato.</td></tr>');
+
+  var rodape = Object.keys(A.margem.fontes||{}).length>1
+    ? '<p class="rx-note">Neste período o relatório usou mais de uma fonte de margem, conforme o mês. A abertura mês a mês está na aba DRE.</p>' : '';
+
+  return card('🔬 Margem e demais números medidos pelo sistema',
+    'Nada aqui é digitado: sai das vendas, do cadastro de produtos e da conciliação de cartão do próprio ONPDV.',
+    tbl(['Indicador','Valor','Base','Leitura'],linhas)+rodape);
+}
+
+/* marca discreta da fonte da margem, para a coluna nao ficar ambigua */
+function FONTE_MARCA(f){
+  return f==='vendas' ? '<sup title="medida item a item">*</sup>'
+       : f==='historico' ? '<sup title="medida pelo giro x custo">*</sup>'
+       : f==='manual' ? '<sup title="informada manualmente">m</sup>' : '';
+}
+function margemNota(){
+  var f=A.margem.fontes||{}, ks=Object.keys(f);
+  if(!ks.length) return '';
+  if(ks.length===1) return 'Margem ' + fonteLabel(ks[0]) + ' em todo o período.';
+  return 'O período combina mais de uma fonte de margem: ' + ks.map(fonteLabel).join('; ') + '.';
 }
 
 /* ---------- DRE ---------- */
@@ -773,12 +865,14 @@ function vDre(){
   var d=A.dre, m=A.nMesesRec||1, R=A.rec.total;
   var mensal=A.dreMes.map(function(x){
     return '<tr><td>'+L(x.k)+'</td><td class="rx-num">'+fm(x.rec)+'</td><td class="rx-num">'+fm(x.compras)
+      +'</td><td class="rx-num" title="'+esc(fonteLabel(x.margFonte))+'">'+pc(x.marg)+FONTE_MARCA(x.margFonte)
       +'</td><td class="rx-num">'+fm(x.cmv)+'</td><td class="rx-num">'+fm(x.folha)+'</td><td class="rx-num">'+fm(x.ocup)
       +'</td><td class="rx-num">'+fm(x.oper-x.folha-x.ocup)+'</td><td class="rx-num '+sgnc(x.result)+'">'+fm(x.result)
       +'</td><td class="rx-num '+sgnc(x.varEst)+'">'+fm(x.varEst)+'</td></tr>';
   });
   mensal.push('<tr class="rx-tot"><td>Total</td><td class="rx-num">'+fm(R)+'</td><td class="rx-num">'+fm(d.compras)
-    +'</td><td class="rx-num">'+fm(d.cmv)+'</td><td class="rx-num">'+fm(d.folha)+'</td><td class="rx-num">'+fm(d.ocupacao)
+    +'</td><td class="rx-num">'+pc(A.margem.pct)+'</td>'
+    +'<td class="rx-num">'+fm(d.cmv)+'</td><td class="rx-num">'+fm(d.folha)+'</td><td class="rx-num">'+fm(d.ocupacao)
     +'</td><td class="rx-num">'+fm(d.adm+d.financ+d.imposto+d.socios+d.outros)+'</td><td class="rx-num '+sgnc(d.resultado)+'">'
     +fm(d.resultado)+'</td><td class="rx-num '+sgnc(d.varEstoque)+'">'+fm(d.varEstoque)+'</td></tr>');
 
@@ -795,12 +889,13 @@ function vDre(){
       +(R?pc(o.v/R):'—')+'</td><td style="width:120px">'+barCell(o.v,maxC)+'</td></tr>';
   });
 
-  return card('📄 DRE do período','Regime de competência pela data de vencimento. O custo da mercadoria é estimado a partir da margem definida em Premissas.',
+  return card('📄 DRE do período','Regime de competência pela data de vencimento. O custo da mercadoria usa a margem '+(A.margem.medida?'medida pelo próprio sistema':'informada em Premissas')+', aplicada mês a mês.',
       vDreTabela()
       +'<p class="rx-note">O ponto de equilíbrio é '+(d.pontoEquilibrioMes!=null?'<b>'+fm(d.pontoEquilibrioMes)+' por mês</b>':'—')
       +': abaixo disso a operação não cobre os custos fixos. A média atual é '+fm(R/m)+'.</p>')
-    + card('📅 Mês a mês','Compare a coluna Compras com CMV: quando compras ficam abaixo do CMV, o estoque encolheu naquele mês.',
-      tbl(['Mês','Receita','Compras','CMV estimado','Pessoal','Fixos','Demais','Resultado','Δ Estoque'],mensal)+g)
+    + card('📅 Mês a mês','Compare a coluna Compras com CMV: quando compras ficam abaixo do CMV, o estoque encolheu naquele mês. A coluna Margem mostra o percentual que o sistema mediu para aquele mês.',
+      tbl(['Mês','Receita','Compras','Margem','CMV','Pessoal','Fixos','Demais','Resultado','Δ Estoque'],mensal)+g
+      + '<p class="rx-note">'+esc(margemNota())+'</p>')
     + card('🔎 Maiores despesas por categoria','As 25 categorias que mais consomem caixa.',
       tbl(['Categoria','No período','Por mês','% da receita',''],rowsCat));
 }
@@ -814,7 +909,7 @@ function vDreTabela(){
     ln('Receita bruta de vendas',R,'rx-tot'),
     ln('(−) Taxa de cartão (estimada)',-d.taxaCartao,'rx-sub2',1),
     ln('(=) Receita líquida de taxas',d.liquida,'rx-tot'),
-    ln('(−) Custo da mercadoria vendida (estimado a '+pc(1-CFG.margem/100,0)+' da venda)',-d.cmv,'rx-sub2',1),
+    ln('(−) Custo da mercadoria vendida ('+pc(1-A.margem.pct,0)+' da venda, margem '+(A.margem.medida?'medida pelo sistema':'informada')+')',-d.cmv,'rx-sub2',1),
     ln('(=) Lucro bruto',d.lucroBruto,'rx-tot'),
     ln('(−) Pessoal: salários, encargos, férias, rescisões',-d.folha,'rx-sub2',1),
     ln('(−) Custos fixos: aluguel, energia, água, contador…',-d.ocupacao,'rx-sub2',1),
@@ -878,6 +973,15 @@ function vLojas(){
         tbl(['Loja','Valor a custo','Unidades'],estRows)) : '');
 }
 
+/* Cenarios de margem: a medida pelo sistema entra na lista e fica destacada;
+   as demais mostram como a conclusao mudaria se a margem real fosse outra. */
+function cenariosMargem(){
+  var real=+(A.margem.pct*100).toFixed(1);
+  var lista=[22,26,30,32,35,38,42].filter(function(v){ return Math.abs(v-real)>0.6; }).concat([real]);
+  lista.sort(function(a,b){ return a-b; });
+  return {lista:lista, real:real};
+}
+
 /* ---------- COMPRAS ---------- */
 function vCompras(){
   var d=A.dre, m=A.nMesesRec||1;
@@ -896,9 +1000,11 @@ function vCompras(){
     +'</td><td class="rx-num">'+(A.rec.total?pc(d.compras/A.rec.total):'—')+'</td><td class="rx-num">'+fm(d.cmv)
     +'</td><td class="rx-num '+sgnc(d.varEstoque)+'">'+fm(d.varEstoque)+'</td></tr>');
 
-  var sim=[22,26,30,32,35,38,42].map(function(mg){
-    var cmv=A.rec.total*(1-mg/100), ve=d.compras-cmv;
-    return '<tr'+(mg===CFG.margem?' style="background:var(--rx-accsoft);font-weight:700"':'')+'><td>'+mg+'%</td>'
+  var cn=cenariosMargem();
+  var sim=cn.lista.map(function(mg){
+    var cmv=A.rec.total*(1-mg/100), ve=d.compras-cmv, eh=(mg===cn.real);
+    return '<tr'+(eh?' style="background:var(--rx-accsoft);font-weight:700"':'')+'><td>'
+      +mg.toFixed(1).replace('.',',')+'%'+(eh?' <span class="rx-pill rx-a">medida pelo sistema</span>':'')+'</td>'
       +'<td class="rx-num">'+fm(cmv)+'</td><td class="rx-num '+sgnc(ve)+'">'+fm(ve)+'</td><td>'
       +(ve<0?'estoque encolheu':'estoque cresceu')+'</td></tr>';
   });
@@ -914,10 +1020,10 @@ function vCompras(){
       + '<p class="rx-note">Se a variação inferida for muito negativa e o estoque atual ainda for alto, o problema não é reposição: é margem mal estimada, perda ou registro. Rode o inventário rotativo e feche essa conta.</p>') : '';
 
   return card('🛒 A conta que explica a prateleira vazia',
-      'Vendeu-se '+fm(A.rec.total)+'. Com margem de '+pc(CFG.margem/100,0)+', isso consumiu cerca de '+fm(d.cmv)+' de mercadoria a preço de custo. Foram comprados '+fm(d.compras)+'.',
+      'Vendeu-se '+fm(A.rec.total)+'. Com margem bruta de '+pc(A.margem.pct,0)+' ('+fonteLabel(A.margem.fonte)+'), isso consumiu cerca de '+fm(d.cmv)+' de mercadoria a preço de custo. Foram comprados '+fm(d.compras)+'.',
       '<div class="rx-grid rx-g3">'
       + kpi('🛒 Compras no período',fm(d.compras),fm(d.compras/m)+' por mês · '+pc(d.compras/Math.max(1,A.rec.total))+' da receita')
-      + kpi('📤 Consumo estimado (CMV)',fm(d.cmv),'a preço de custo, pela margem informada')
+      + kpi('📤 Consumo de mercadoria (CMV)',fm(d.cmv),'a preço de custo, pela margem '+(A.margem.medida?'medida':'informada'))
       + kpi(d.varEstoque<0?'📉 Estoque consumido':'📦 Estoque acumulado',fm(Math.abs(d.varEstoque)),
             d.varEstoque<0?'saiu da prateleira e não voltou':'dinheiro parado em mercadoria',sgnc(d.varEstoque))
       + '</div>'
@@ -1104,18 +1210,17 @@ function vPlanoCorpo(){
 
 /* ---------- PREMISSAS ---------- */
 function vConfig(){
-  var med=A?A.medido:{}, tx=(A&&A.meta.taxa_cartao)||{};
+  var M=(A&&A.margemSrc)||{}, tx=(A&&A.meta.taxa_cartao)||{};
   function row(id,lb,sub,val,suf,medido){
     return '<div class="rx-cfgrow"><div><b>'+lb+'</b><small>'+sub+'</small></div>'
       +'<div style="white-space:nowrap"><input type="number" step="0.1" id="rxcfg_'+id+'" value="'+val+'"> '+suf
       +(medido!=null? ' <button type="button" class="rx-med" data-usar="'+id+'" data-val="'+medido+'">usar medido: '+medido.toFixed(1).replace('.',',')+suf+'</button>':'')
       +'</div></div>';
   }
-  var margemMed = (med && med.margem!=null) ? +(med.margem*100).toFixed(1) : null;
-  return card('⚙️ Premissas do cálculo',
-      'O relatório lê tudo do banco do ONPDV. Estes cinco números ainda dependem de você — ou de cadastro completo no sistema. Mudar qualquer um recalcula tudo.',
-      row('margem','Margem bruta média','Quanto sobra da venda depois de pagar o custo do produto. Quando o custo está cadastrado nos produtos, o sistema mede sozinho.',CFG.margem,'%',margemMed)
-    + row('txCred','Taxa da maquininha — crédito','Vem do extrato da adquirente. A conciliação do Mercado Pago já calcula a taxa efetiva quando há liquidações importadas.',CFG.txCred,'%',tx.credito!=null?+tx.credito:null)
+  return cardMargemConfig()
+    + card('⚙️ Demais premissas',
+      'A margem vem do sistema (acima). Estes quatro números ainda não existem no banco e precisam vir de você ou do contador. Mudar qualquer um recalcula o relatório inteiro.',
+      row('txCred','Taxa da maquininha — crédito','Vem do extrato da adquirente. A conciliação do Mercado Pago já calcula a taxa efetiva quando há liquidações importadas.',CFG.txCred,'%',tx.credito!=null?+tx.credito:null)
     + row('txDeb','Taxa da maquininha — débito','',CFG.txDeb,'%',tx.debito!=null?+tx.debito:null)
     + row('aliq','Alíquota efetiva de imposto sobre venda','Simples Nacional, comércio. Peça o percentual efetivo ao contador; costuma ficar entre 4% e 11% conforme o faturamento dos últimos 12 meses.',CFG.aliq,'%',null)
     + row('prazoCred','Prazo de recebimento do crédito','Dias até o dinheiro do cartão de crédito cair na conta.',CFG.prazoCred,'dias',null)
@@ -1130,11 +1235,48 @@ function vConfig(){
         '<tr><td>Atraso</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Diferença entre a data de pagamento e a data de vencimento da parcela</td></tr>',
         '<tr><td>Transferência entre lojas</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Transferências confirmadas, a custo, lançadas na loja de destino e excluídas do total de despesas</td></tr>',
         '<tr><td>Estoque a custo</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Saldo por loja × custo cadastrado no produto</td></tr>',
-        '<tr><td>Margem medida</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Itens vendidos com custo unitário registrado na venda (ou custo do produto)</td></tr>',
+        '<tr><td>Margem bruta</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)"><b>Medida pelo sistema</b>, na melhor fonte disponível em cada mês: itens vendidos com custo registrado; senão quantidade vendida de cada produto × custo cadastrado; senão o cadastro de produtos</td></tr>',
         '<tr><td>Taxa real de cartão</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Liquidações conciliadas do Mercado Pago (tarifa ÷ valor da transação)</td></tr>',
-        '<tr><td>Custo da mercadoria vendida</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)"><b>Estimado</b>: receita × (1 − margem bruta), enquanto o custo por produto não cobrir a venda</td></tr>',
+        '<tr><td>Custo da mercadoria vendida</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)">Receita do mês × (1 − margem medida daquele mês), somado mês a mês</td></tr>',
         '<tr><td>Imposto devido</td><td style="text-align:left;white-space:normal;color:var(--rx-tx2)"><b>Estimado</b> pela alíquota efetiva informada acima</td></tr>'
       ]));
+}
+
+/* A margem deixou de ser campo digitado: aqui ela e apresentada como leitura do
+   sistema, com a substituicao manual disponivel apenas como excecao declarada. */
+function cardMargemConfig(){
+  var M=A.margemSrc||{}, manual=!!CFG.margemManual;
+  var linhas=[];
+  var meses=A.meses.filter(function(k){ return (A.rec.mes[k]||0)>0; });
+  meses.forEach(function(k){
+    var g=A.margemMes[k]||{};
+    linhas.push('<tr><td>'+L(k)+'</td><td class="rx-num">'+pc(g.pct)+'</td><td>'+esc(fonteLabel(g.fonte))
+      +'</td><td class="rx-num">'+(g.cobertura!=null?pc(g.cobertura)+' do mês':'—')+'</td></tr>');
+  });
+  if(!linhas.length) linhas.push('<tr><td colspan="4">Sem receita no período.</td></tr>');
+
+  var corpo=''
+    + '<div class="rx-grid rx-g3" style="margin-bottom:12px">'
+    + kpi('📐 Margem em uso',pc(A.margem.pct),fonteLabel(A.margem.fonte),A.margem.medida?'rx-pos':'rx-warn')
+    + kpi('🧾 Base custeada',M.global?fm(M.global.receita):'—',
+          A.margem.cobertura!=null? pc(A.margem.cobertura)+' de toda a receita conhecida':'sem venda custeada')
+    + kpi('📦 Produtos sem custo',nf((M.catalogo&&M.catalogo.semCusto)||0),
+          'cada um que entra melhora a medição',((M.catalogo&&M.catalogo.semCusto)?'rx-neg':'rx-pos'))
+    + '</div>'
+    + tbl(['Mês','Margem aplicada','Como foi obtida','Cobertura'],linhas)
+    + '<div class="rx-cfgrow" style="margin-top:14px">'
+      + '<div><b>Substituir por um valor manual</b>'
+      + '<small>Só para simulação. Marcando esta opção o relatório passa a ignorar a medição do sistema e usar o percentual digitado em todos os meses — o cabeçalho da DRE passa a dizer “margem informada”.</small></div>'
+      + '<div style="white-space:nowrap">'
+        + '<label class="rx-chk" style="display:inline-flex;gap:6px;align-items:center;margin-right:8px">'
+          + '<input type="checkbox" id="rxMargemManual"'+(manual?' checked':'')+'> usar manual</label>'
+        + '<input type="number" step="0.1" id="rxcfg_margem" value="'+CFG.margem+'"'+(manual?'':' disabled')+'> % '
+        + '<button class="btn ghost sm" type="button" id="rxMargemAplicar">Aplicar</button>'
+      + '</div></div>';
+
+  return card('📐 Margem bruta — medida pelo sistema',
+    'O custo da mercadoria vendida sai daqui. O relatório escolhe, mês a mês, a melhor fonte que existir no banco.',
+    corpo);
 }
 
 /* ---------- RELATÓRIO COMPLETO ---------- */
@@ -1205,9 +1347,9 @@ function vRelatorio(){
   out+=ch('Metodologia, fontes e premissas','De onde vem cada número deste relatório.',
       pp('As despesas vêm de <b>Contas a pagar</b>, pelo valor da parcela, agrupadas pelo centro de custo e alocadas pela <b>data de vencimento</b> — regime de competência. As receitas vêm das <b>vendas do PDV</b>, somadas pela data da venda, excluídas canceladas e orçamentos. Os juros vêm do campo Juros da parcela, e o atraso é a diferença entre a data de pagamento e a de vencimento.')
     + pp('As transferências internas de mercadoria entre lojas ('+fm(A.desp.transf)+' no período) foram <b>excluídas</b> do total de despesas: representam mercadoria que sai de uma unidade e entra em outra, e contá-las duplicaria o custo. No capítulo de lojas elas voltam a aparecer, porque lá interessa saber quanto de mercadoria cada unidade consumiu.')
-    + pp('Cinco números ainda são premissas. Estão declarados abaixo e podem ser alterados na aba Premissas — qualquer mudança recalcula o relatório inteiro. Conforme o cadastro do sistema fica completo (custo por produto, conciliação de cartão), essas premissas são substituídas por medição.')
+    + pp('A margem bruta é <b>medida pelo próprio sistema</b> e não é digitada: em cada mês vale a melhor fonte disponível — os itens vendidos com custo registrado, ou a quantidade vendida de cada produto multiplicada pelo custo cadastrado. Os quatro números da tabela abaixo, esses sim, ainda são premissas: não existem no banco e podem ser ajustados na aba Premissas.')
     + tbl(['Premissa','Valor usado','Efeito no relatório'],[
-        '<tr><td>Margem bruta média</td><td class="rx-num">'+pc(CFG.margem/100,0)+'</td><td style="text-align:left;white-space:normal">Define o custo da mercadoria vendida e, por consequência, a variação de estoque e o lucro bruto</td></tr>',
+        '<tr><td>Margem bruta média <span class="rx-pill rx-a">medida</span></td><td class="rx-num">'+pc(A.margem.pct)+'</td><td style="text-align:left;white-space:normal">Não é premissa: é '+esc(fonteLabel(A.margem.fonte))+'. Define o custo da mercadoria vendida e, por consequência, a variação de estoque e o lucro bruto</td></tr>',
         '<tr><td>Taxa de cartão — crédito</td><td class="rx-num">'+pc(CFG.txCred/100,2)+'</td><td style="text-align:left;white-space:normal">Deduzida da receita; não aparece nas contas a pagar</td></tr>',
         '<tr><td>Taxa de cartão — débito</td><td class="rx-num">'+pc(CFG.txDeb/100,2)+'</td><td style="text-align:left;white-space:normal">Idem</td></tr>',
         '<tr><td>Alíquota efetiva de imposto</td><td class="rx-num">'+pc(CFG.aliq/100,1)+'</td><td style="text-align:left;white-space:normal">Base da provisão fiscal comparada ao imposto efetivamente pago</td></tr>',
@@ -1302,7 +1444,7 @@ function vRelatorio(){
 
   /* 4. DRE */
   out+=ch('Demonstrativo de resultado (DRE)','Da venda bruta até o resultado ajustado, mês a mês.',
-      pp('A DRE abaixo parte da receita bruta e desce até o resultado. Duas linhas são estimadas e estão sinalizadas: a taxa de cartão e o custo da mercadoria vendida, calculado como receita × (1 − margem bruta de '+pc(CFG.margem/100,0)+').')
+      pp('A DRE abaixo parte da receita bruta e desce até o resultado. A taxa de cartão é estimada pelas premissas; o custo da mercadoria vendida usa a margem bruta de '+pc(A.margem.pct,0)+', '+fonteLabel(A.margem.fonte)+', aplicada mês a mês.')
     + vDreTabela()
     + h3('Abertura mensal')
     + vDreMensal()
@@ -1333,20 +1475,22 @@ function vRelatorio(){
   rowsCE.push('<tr class="rx-tot"><td>Total</td><td class="rx-num">'+fm(R)+'</td><td class="rx-num">'+fm(d.compras)
     +'</td><td class="rx-num">'+pc(d.compras/Math.max(1,R))+'</td><td class="rx-num">'+fm(d.cmv)+'</td><td class="rx-num '
     +sgnc(d.varEstoque)+'">'+fm(d.varEstoque)+'</td></tr>');
-  var cen=[22,26,30,32,35,38,42].map(function(mg){
-    var cmv=R*(1-mg/100), ve=d.compras-cmv;
-    return '<tr'+(mg===CFG.margem?' style="background:var(--rx-accsoft);font-weight:700"':'')+'><td>'+mg+'%</td><td class="rx-num">'
+  var cnR=cenariosMargem();
+  var cen=cnR.lista.map(function(mg){
+    var cmv=R*(1-mg/100), ve=d.compras-cmv, eh=(mg===cnR.real);
+    return '<tr'+(eh?' style="background:var(--rx-accsoft);font-weight:700"':'')+'><td>'
+      +mg.toFixed(1).replace('.',',')+'%'+(eh?' <span class="rx-pill rx-a">medida</span>':'')+'</td><td class="rx-num">'
       +fm(cmv)+'</td><td class="rx-num '+sgnc(ve)+'">'+fm(ve)+'</td><td>'+(ve<0?'estoque encolheu':'estoque cresceu')+'</td></tr>';
   });
   out+=ch('Compras, estoque e ruptura','A conta que explica por que a prateleira esvazia enquanto os boletos chegam.',
-      pp('Vender '+fm(R)+' com margem bruta de '+pc(CFG.margem/100,0)+' consome aproximadamente <b>'+fm(d.cmv)+'</b> de mercadoria a preço de custo. No mesmo período foram comprados <b>'+fm(d.compras)+'</b>. A diferença é <b class="'+sgnc(d.varEstoque)+'">'+fm(d.varEstoque)+'</b>.')
+      pp('Vender '+fm(R)+' com margem bruta de '+pc(A.margem.pct,0)+' ('+fonteLabel(A.margem.fonte)+') consome aproximadamente <b>'+fm(d.cmv)+'</b> de mercadoria a preço de custo. No mesmo período foram comprados <b>'+fm(d.compras)+'</b>. A diferença é <b class="'+sgnc(d.varEstoque)+'">'+fm(d.varEstoque)+'</b>.')
     + (d.varEstoque<0
       ? callout('<b>Diagnóstico da ruptura.</b> Comprando '+fm(Math.abs(d.varEstoque))+' a menos do que a venda consumiu em '+m+' meses ('+fm(Math.abs(d.varEstoque)/m)+' por mês), o estoque das lojas encolhe de forma contínua. O mecanismo é sempre o mesmo: o dinheiro da venda cobre folha, aluguel e boletos vencidos antes de repor a mercadoria, então a reposição sai sempre menor que a saída. Prateleira vazia derruba a venda do mês seguinte, que aperta o caixa de novo — é um ciclo que se realimenta e não se resolve comprando mais no mesmo ritmo de pagamento.',1)
       : callout('As compras superaram o consumo estimado em '+fm(d.varEstoque)+'. Isso prende caixa: o boleto vence antes de o produto girar.'))
     + (A.estoqueMedido.total>0 ? pp('O ONPDV registra hoje <b>'+fm(A.estoqueMedido.total)+'</b> de estoque a custo ('+nf(A.estoqueMedido.unidades)+' unidades)'+(A.estoqueMedido.meses!=null?', equivalente a '+A.estoqueMedido.meses.toFixed(1).replace('.',',')+' meses de consumo estimado':'')+'. Confrontar este saldo com a variação inferida acima é a forma mais rápida de descobrir se a queda de estoque é reposição insuficiente ou perda não registrada.') : '')
     + tbl(['Mês','Receita','Compras','Compras / receita','CMV estimado','Δ Estoque'],rowsCE)
     + h3('Sensibilidade à margem real')
-    + pp('Toda a conta acima depende da margem bruta. Se a margem verdadeira for diferente da premissa, a conclusão muda de tamanho — por isso cadastrar o custo dos produtos é a primeira providência técnica.')
+    + pp('A linha destacada é a margem que o sistema mediu. As demais mostram de que tamanho seria a conclusão se a margem real fosse outra — é o teste de robustez do diagnóstico, não uma escolha a fazer.')
     + tbl(['Margem bruta','CMV no período','Δ Estoque','Leitura'],cen));
 
   /* 7. FORNECEDORES / ABC */
@@ -1466,7 +1610,7 @@ function vRelatorio(){
   /* 14. LIMITAÇÕES */
   out+=ch('Limitações e ressalvas','O que este relatório não sabe.',
       '<ul class="rx-rp" style="padding-left:20px">'
-    + '<li style="margin-bottom:8px">O <b>custo da mercadoria vendida é estimado</b> a partir de uma margem única aplicada a toda a receita, enquanto o custo por produto não cobrir a venda. Na prática a margem varia bastante entre ração, acessório, medicamento e serviço.</li>'
+    + '<li style="margin-bottom:8px">O <b>custo da mercadoria vendida é apurado pela margem medida</b>, aplicada sobre a receita de cada mês. A medição é ponderada pelo giro real, mas continua sendo uma margem média: dentro do mesmo mês ela não distingue ração de acessório ou de medicamento. Meses sem venda custeada herdam a margem medida no conjunto.</li>'
     + '<li style="margin-bottom:8px">A <b>variação de estoque é inferida</b> pela diferença entre compras e CMV. O saldo de estoque a custo apresentado é medido, mas só um inventário físico confirma se a mercadoria realmente encolheu ou se existe perda, quebra, furto ou venda sem registro.</li>'
     + '<li style="margin-bottom:8px">As <b>taxas de cartão e a alíquota de imposto são premissas</b> enquanto não houver conciliação completa da adquirente e informação do contador.</li>'
     + '<li style="margin-bottom:8px">A análise usa a <b>data de vencimento</b> como competência. Despesas lançadas fora do mês de origem deslocam a leitura mensal, embora não alterem o total do período.</li>'
@@ -1593,13 +1737,30 @@ function wire(){
   if(loja) loja.onchange=function(){ OPTS.storeId=loja.value; load(true); };
   if(rel) rel.onclick=function(){ load(true); };
 
+  /* substituicao manual da margem: excecao declarada, nao o caminho normal */
+  var mm=q('#rxMargemManual');
+  if(mm) mm.onchange=function(){
+    CFG.margemManual=mm.checked;
+    var i=q('#rxcfg_margem'); if(i) i.disabled=!mm.checked;
+    if(!mm.checked){ saveCfg(); recalc(); paint();
+      say('Margem de volta à medição do sistema.'); }
+  };
   var ap=q('#rxCfgApply');
   if(ap) ap.onclick=function(){
-    ['margem','txCred','txDeb','aliq','prazoCred'].forEach(function(k){
+    ['txCred','txDeb','aliq','prazoCred'].forEach(function(k){
       var i=q('#rxcfg_'+k); if(i){ var v=parseFloat(i.value); if(isFinite(v)) CFG[k]=v; }
     });
     saveCfg(); recalc(); VIEW='visao'; paint();
     say('Relatório recalculado com as novas premissas.');
+  };
+  var am=q('#rxMargemAplicar');
+  if(am) am.onclick=function(){
+    var i=q('#rxcfg_margem'), v=i?parseFloat(i.value):NaN;
+    if(isFinite(v)) CFG.margem=v;
+    CFG.margemManual=!!(mm&&mm.checked);
+    saveCfg(); recalc(); paint();
+    say(CFG.margemManual? 'Relatório recalculado com a margem informada.'
+                        : 'Margem de volta à medição do sistema.');
   };
   var rs=q('#rxCfgReset');
   if(rs) rs.onclick=function(){ CFG=Object.assign({},CFG_DEFAULT); saveCfg(); recalc(); paint(); };
