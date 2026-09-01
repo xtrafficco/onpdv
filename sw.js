@@ -3,7 +3,7 @@
 //  • entregador.html → app do entregador
 // Estratégia: navegação = network-first (pega a versão nova; cai no cache quando offline);
 // estáticos (ícones, lib) = cache-first. Chamadas ao Supabase NUNCA são cacheadas.
-const CACHE = 'onpdv-v48';
+const CACHE = 'onpdv-v49';
 // supabase-js fixado (mesma versão+SRI do HTML): pré-cacheado para os apps abrirem
 // offline mesmo se a CDN estiver fora do ar.
 const SUPABASE_LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8';
@@ -90,7 +90,29 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Estáticos (ícones, fontes, lib supabase): cache-first com atualização em 2º plano.
+  // Código do próprio app (JS, CSS e partials): NETWORK-FIRST.
+  // Cache-first aqui era a causa do sintoma "publiquei o arquivo e o sistema continua
+  // com a versão velha": o navegador servia o onpdv-app.js antigo do cache enquanto o
+  // bootstrap buscava o partial com no-store, então a tela nova aparecia no menu mas o
+  // JS por trás dela era o antigo — e a página abria em branco. Com network-first a
+  // publicação passa a valer na recarga seguinte, e o cache só entra quando está offline.
+  const isAppCode = url.origin === self.location.origin
+    && (url.pathname.includes('/assets/') || url.pathname.includes('/partials/'));
+  if (isAppCode) {
+    e.respondWith(
+      fetch(req).then((res) => {
+        if (res && res.status === 200 && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        }
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // Demais estáticos (ícones, fontes, leaflet, lib supabase): cache-first com
+  // atualização em 2º plano. São arquivos versionados ou que não mudam.
   e.respondWith(
     caches.match(req).then((cached) => {
       const network = fetch(req).then((res) => {

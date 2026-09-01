@@ -14,7 +14,22 @@
   let appPromise = null;
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    // Quando um service worker novo assume o controle, a aba ainda está rodando o JS
+    // que o worker antigo entregou. Sem recarregar, o usuário vê a interface nova com
+    // o código velho por trás (menu novo, tela em branco). Recarregamos uma única vez,
+    // e só quando já havia um worker no comando — na primeira instalação não é preciso.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      location.reload();
+    });
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js')
+        .then((reg) => reg.update().catch(() => {}))
+        .catch(() => {});
+    });
   }
 
   function setMessage(text, isError = false) {

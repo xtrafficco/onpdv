@@ -403,7 +403,11 @@ function openBoPage(pg){
   const activeNav=$(`.bo-nav [data-page="${pg}"]`);if(activeNav){const group=activeNav.closest('.bo-nav-group');if(group){group.classList.add('open');const toggle=group.querySelector('.bo-group-toggle');if(toggle)toggle.setAttribute('aria-expanded','true');}}
   setBoMenu(false);
   $$('.page').forEach(p=>p.classList.remove('act'));
-  const el=$('#page-'+pg); if(el) el.classList.add('act');
+  const el=$('#page-'+pg);
+  if(el) el.classList.add('act');
+  // Sem isso, uma interface fora de sincronia com o JS (cache antigo, publicação parcial)
+  // simplesmente apaga o conteúdo e deixa a tela em branco, sem explicação.
+  else toast('Esta tela não existe nesta versão do sistema. Recarregue a página com Ctrl+Shift+R.',true);
   const t=$('#boTitle'); if(t) t.textContent=PAGE_TITLES[pg]||'';
   if(pg==='home') loadHome();
   if(pg==='decisao') loadDecisionCenter();
@@ -794,7 +798,7 @@ window.pdvOfflineCacheState = function(){
 // ============ CHECAGEM DE NOVA VERSÃO (caixa instalado) ============
 // O caixa roda dos arquivos locais; para saber se saiu versão nova, consulta o version.json
 // do site publicado e avisa (com link para baixar o instalador). Não aplica sozinho.
-const ONPDV_VERSION='2026.09.01-v47';
+const ONPDV_VERSION='2026.09.01-v49';
 const ONPDV_SITE='https://onpdv.vercel.app';
 function _verKey(v){ v=String(v||''); const d=(v.match(/(\d{4})\.(\d{2})\.(\d{2})/)||[]).slice(1).join(''); const n=(v.match(/v(\d+)/i)||[])[1]||'0'; return [ +d||0, +n||0 ]; }
 function _updateIsNewer(a,b){ const ka=_verKey(a), kb=_verKey(b); return ka[0]>kb[0] || (ka[0]===kb[0] && ka[1]>kb[1]); }
