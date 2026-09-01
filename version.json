@@ -1,0 +1,5 @@
+{
+  "version": "2026.09.01-v47",
+  "installer": "/downloads/onpdv-caixa.bat",
+  "notes": "Frente de caixa offline: cache de referência, fila de vendas/operações, sincronização automática, QR local, pílula de conexão."
+}

@@ -1,5 +1,5 @@
-ONPDV v35 - PACOTE PARA PUBLICACAO
-Data: 25/08/2026
+ONPDV v47 (caixa offline) - PACOTE PARA PUBLICACAO
+Data: 01/09/2026
 
 Envie TODO o conteúdo desta pasta para a raiz do site, mantendo exatamente
 as subpastas assets, downloads, icons, lib e partials.
@@ -9,11 +9,15 @@ partials, lib, icons e downloads. Publicar somente os arquivos da raiz deixa
 o index.html sem cores e impede o carregamento do sistema.
 
 Arquivo inicial: index.html
-Cache PWA: onpdv-v35
+Cache PWA: onpdv-v47
 Instalador do caixa: downloads/onpdv-caixa.bat
 
 SHA-256 do pacote interno do instalador:
-6931556B0F91CCE2F3FA392AF30FC5CE206D2E2E69C4474864D5F218385BC1FD
+7F987E37B3D78C615274E27501681C00ACAB9024562CD8341CE9D4CCE2ACB000
+
+IMPORTANTE: publique também o arquivo version.json na raiz do site — é ele que
+avisa os caixas instalados quando sai uma versão nova. Ao publicar uma nova
+versão, atualize "version" no version.json e "Cache PWA" acima.
 
 Não envie as pastas node_modules, tests, test-results ou supabase para a
 hospedagem estática. As migrations do Supabase são administradas separadamente

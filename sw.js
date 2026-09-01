@@ -3,7 +3,7 @@
 //  • entregador.html → app do entregador
 // Estratégia: navegação = network-first (pega a versão nova; cai no cache quando offline);
 // estáticos (ícones, lib) = cache-first. Chamadas ao Supabase NUNCA são cacheadas.
-const CACHE = 'onpdv-v45';
+const CACHE = 'onpdv-v47';
 // supabase-js fixado (mesma versão+SRI do HTML): pré-cacheado para os apps abrirem
 // offline mesmo se a CDN estiver fora do ar.
 const SUPABASE_LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8';
@@ -37,7 +37,15 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // Pré-cache TOLERANTE: se um item falhar (ex.: a lib do Supabase via CDN indisponível na
+  // primeira instalação), o SW ainda instala e cacheia todo o resto — o que falhar é
+  // buscado depois pelo handler de fetch. Evita que o app fique sem casca offline por um
+  // único recurso externo. (addAll é tudo-ou-nada; allSettled sobre add() não é.)
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.allSettled(SHELL.map((u) => c.add(u))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -56,6 +64,8 @@ self.addEventListener('fetch', (e) => {
   if (url.origin.includes('supabase.co') || url.pathname.includes('/functions/v1/') || url.pathname.includes('/rest/v1/') || url.pathname.includes('/auth/v1/')) {
     return; // deixa o navegador ir direto à rede
   }
+  // version.json precisa ser sempre fresco (checagem de atualização) — nunca do cache.
+  if (url.pathname.endsWith('/version.json')) { return; }
 
   // Navegações (documentos HTML): NETWORK-FIRST. Este SW tem escopo raiz e controla
   // todo o site — os quatro frontends. Cache-first serviria uma versão
