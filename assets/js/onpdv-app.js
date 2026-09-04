@@ -274,6 +274,129 @@ window.openMyPasswordGo = async ()=>{
   closeModal(); toast('Sua senha foi atualizada ✓');
 };
 
+/* ===================== 2FA (verificação em duas etapas · TOTP) ===================== */
+let _mfaPendingSession=null;
+function show2faChallenge(){
+  $('#app').classList.add('hide');
+  $('#login').classList.remove('hide');
+  $('#liMsg').textContent='';
+  const shell=document.querySelector('#login .box'); if(shell) shell.classList.add('mfa-step');
+  const box=$('#li2fa'); if(box) box.classList.remove('hide');
+  const code=$('#li2faCode'); if(code){ code.value=''; setTimeout(()=>{ try{code.focus();}catch(_){} }, 60); }
+  const m=$('#li2faMsg'); if(m) m.textContent='';
+}
+function hide2faChallenge(){
+  const shell=document.querySelector('#login .box'); if(shell) shell.classList.remove('mfa-step');
+  const box=$('#li2fa'); if(box) box.classList.add('hide');
+}
+async function mfaVerifiedFactor(){
+  const { data:fl, error } = await sb.auth.mfa.listFactors();
+  if(error) throw error;
+  const list=(fl&&(fl.totp||[])).filter(f=>f.status==='verified');
+  return list[0] || ((fl&&fl.all||[]).find(f=>f.factor_type==='totp'&&f.status==='verified')) || null;
+}
+{ const bv=$('#btn2faVerify'); if(bv) bv.onclick = async ()=>{
+  const code=(($('#li2faCode')||{}).value||'').replace(/\D/g,'');
+  const msg=$('#li2faMsg');
+  if(code.length<6){ if(msg) msg.textContent='Digite o código de 6 dígitos.'; return; }
+  const btn=$('#btn2faVerify'); btn.disabled=true; if(msg) msg.textContent='Verificando…';
+  try{
+    const factor=await mfaVerifiedFactor();
+    if(!factor) throw new Error('Nenhum fator 2FA verificado nesta conta.');
+    const { data:ch, error:ce } = await sb.auth.mfa.challenge({ factorId:factor.id }); if(ce) throw ce;
+    const { error:ve } = await sb.auth.mfa.verify({ factorId:factor.id, challengeId:ch.id, code }); if(ve) throw ve;
+    hide2faChallenge();
+    const { data:{ session } } = await sb.auth.getSession();
+    _mfaPendingSession=null;
+    await onLogin(session||_mfaPendingSession);
+  }catch(e){ if(msg) msg.textContent=(e&&e.message)||'Código inválido.'; btn.disabled=false; }
+}; }
+{ const bc=$('#btn2faCancel'); if(bc) bc.onclick = async ()=>{
+  try{ await sb.auth.signOut({scope:'local'}); }catch(_){}
+  hide2faChallenge();
+  location.reload();
+}; }
+{ const c=$('#li2faCode'); if(c) c.addEventListener('keydown', e=>{ if(e.key==='Enter' && !$('#btn2faVerify').disabled) $('#btn2faVerify').click(); }); }
+
+// Gerenciamento do 2FA (ativar / remover) — usado pelo admin.
+window.open2FA = async (encourage)=>{
+  modal('<div class="m-head"><h3>🔒 Verificação em duas etapas</h3><button data-modal-close>✕</button></div>'
+    +'<div class="m-body" id="tfaBody"><p class="muted">Carregando…</p></div>');
+  await tfaRenderStatus(!!encourage);
+};
+async function tfaRenderStatus(encourage){
+  const body=$('#tfaBody'); if(!body) return;
+  let factors=[];
+  try{ const { data:fl, error } = await sb.auth.mfa.listFactors(); if(error) throw error;
+    factors=(fl&&(fl.totp||[])).filter(f=>f.status==='verified'); }
+  catch(e){ body.innerHTML='<p class="muted">Não foi possível consultar o 2FA: '+esc((e&&e.message)||'')+'</p>'; return; }
+  if(factors.length){
+    body.innerHTML=''
+      +'<div class="ok" style="font-weight:700;margin-bottom:6px">✅ 2FA ativo nesta conta.</div>'
+      +'<p class="muted" style="margin:0 0 12px">A cada login será pedido o código do app autenticador.</p>'
+      +factors.map(f=>'<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px">'
+        +'<span><b>'+esc(f.friendly_name||'Autenticador')+'</b><br><span class="muted" style="font-size:12px">app autenticador (TOTP)</span></span>'
+        +'<button class="btn ghost sm" data-onclick="tfaRemove(\''+f.id+'\')">Remover</button></div>').join('')
+      +'<div class="m-foot" style="padding:0;margin-top:10px"><button class="btn ghost" data-modal-close>Fechar</button>'
+      +'<button class="btn" data-onclick="tfaStartEnroll()">Adicionar outro app</button></div>';
+  } else {
+    body.innerHTML=''
+      +(encourage?'<div class="chip amber" style="margin-bottom:8px">Recomendado para o administrador</div>':'')
+      +'<p class="muted" style="margin:0 0 12px">Ative a verificação em duas etapas: além da senha, o login pedirá um código de 6 dígitos gerado por um app autenticador (Google Authenticator, Authy, etc.).</p>'
+      +'<div class="m-foot" style="padding:0"><button class="btn ghost" data-modal-close>Agora não</button>'
+      +'<button class="btn" data-onclick="tfaStartEnroll()">Ativar 2FA</button></div>';
+  }
+}
+window.tfaStartEnroll = async ()=>{
+  const body=$('#tfaBody'); if(!body) return;
+  body.innerHTML='<p class="muted">Gerando o QR Code…</p>';
+  try{
+    const { data:en, error } = await sb.auth.mfa.enroll({ factorType:'totp', friendlyName:'ONPDV '+new Date().toLocaleString('pt-BR') });
+    if(error) throw error;
+    const qr=(en.totp&&en.totp.qr_code)||''; const secret=(en.totp&&en.totp.secret)||'';
+    window._tfaEnrollId=en.id;
+    body.innerHTML=''
+      +'<p class="muted" style="margin:0 0 10px">1) Escaneie o QR no seu app autenticador (ou digite a chave). 2) Informe o código de 6 dígitos que aparecer.</p>'
+      +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">'
+        +'<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;max-width:200px">'+qr+'</div>'
+        +'<div style="flex:1 1 200px">'
+          +(secret?'<div class="lbl">Chave manual</div><div style="font-family:monospace;font-size:13px;word-break:break-all;background:#f5f7fb;border-radius:8px;padding:8px;margin-bottom:10px">'+esc(secret)+'</div>':'')
+          +'<div class="field"><label class="lbl" for="tfaCode">Código do app</label><input id="tfaCode" class="in" inputmode="numeric" maxlength="6" placeholder="000000" style="letter-spacing:.3em;text-align:center;font-size:18px"></div>'
+          +'<p id="tfaMsg" class="muted"></p>'
+        +'</div>'
+      +'</div>'
+      +'<div class="m-foot" style="padding:0;margin-top:10px"><button class="btn ghost" data-onclick="tfaCancelEnroll()">Cancelar</button>'
+      +'<button class="btn" data-onclick="tfaConfirmEnroll()">Confirmar e ativar</button></div>';
+    setTimeout(()=>{ const i=$('#tfaCode'); if(i) i.focus(); }, 60);
+  }catch(e){ body.innerHTML='<p class="muted">Não foi possível iniciar o 2FA: '+esc((e&&e.message)||'')+'</p><div class="m-foot" style="padding:0"><button class="btn ghost" data-modal-close>Fechar</button></div>'; }
+};
+window.tfaConfirmEnroll = async ()=>{
+  const id=window._tfaEnrollId; const code=(($('#tfaCode')||{}).value||'').replace(/\D/g,'');
+  const msg=$('#tfaMsg');
+  if(!id){ return; }
+  if(code.length<6){ if(msg) msg.textContent='Digite o código de 6 dígitos.'; return; }
+  const btn=event&&event.target&&event.target.tagName==='BUTTON'?event.target:null;
+  if(btn){ btn.disabled=true; btn.textContent='Ativando…'; }
+  try{
+    const { data:ch, error:ce } = await sb.auth.mfa.challenge({ factorId:id }); if(ce) throw ce;
+    const { error:ve } = await sb.auth.mfa.verify({ factorId:id, challengeId:ch.id, code }); if(ve) throw ve;
+    window._tfaEnrollId=null;
+    toast('2FA ativado ✓ — a partir do próximo login será pedido o código');
+    await tfaRenderStatus(false);
+  }catch(e){ if(msg) msg.textContent=(e&&e.message)||'Código inválido, tente novamente.'; if(btn){ btn.disabled=false; btn.textContent='Confirmar e ativar'; } }
+};
+window.tfaCancelEnroll = async ()=>{
+  const id=window._tfaEnrollId; window._tfaEnrollId=null;
+  if(id){ try{ await sb.auth.mfa.unenroll({ factorId:id }); }catch(_){} }
+  await tfaRenderStatus(false);
+};
+window.tfaRemove = async (id)=>{
+  if(!await uiConfirm('Remover este autenticador? O login voltará a pedir só a senha.',{danger:true,okText:'Remover'})) return;
+  try{ const { error } = await sb.auth.mfa.unenroll({ factorId:id }); if(error) throw error;
+    toast('Autenticador removido'); await tfaRenderStatus(false);
+  }catch(e){ toast('Erro: '+((e&&e.message)||''),true); }
+};
+
 async function onLogin(session){
   // Busca o perfil do usuário; offline, cai no último perfil salvo (semeado num login online).
   let me=null, meError=null;
@@ -299,6 +422,20 @@ async function onLogin(session){
     $('#app').classList.add('hide'); $('#login').classList.remove('hide');
     $('#liMsg').textContent='Conta sem acesso ativo ao ONPDV. Fale com o administrador.';
     ME=null; return;
+  }
+  // ===== 2FA (verificação em duas etapas) =====
+  // Se a conta já tem um fator TOTP verificado, o Supabase eleva o "nextLevel" para
+  // aal2; só liberamos o app depois que o operador digitar o código do autenticador.
+  // Enquanto a rede estiver ok — offline não dá para desafiar, então não trava o boot.
+  if(navigator.onLine){
+    try{
+      const { data:aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+      if(aal && aal.nextLevel==='aal2' && aal.currentLevel!=='aal2'){
+        _mfaPendingSession = session;
+        show2faChallenge();
+        return;   // interrompe o boot até verificar o 2FA
+      }
+    }catch(_){ /* MFA indisponível: segue sem travar */ }
   }
   $('#login').classList.add('hide');
   $('#app').classList.remove('hide');
@@ -331,6 +468,18 @@ async function onLogin(session){
   else { enterPdv(); startPickupPoll(); }
   pushRefreshIfEnabled();   // revalida a inscrição de push deste dispositivo (não bloqueia o login)
   checkForUpdate();         // avisa se há versão nova publicada (não bloqueia o login)
+  maybePromptAdmin2FA();    // admin sem 2FA configurado: convida a ativar (não bloqueia)
+}
+// Convida o admin a ativar o 2FA se ainda não houver fator verificado.
+async function maybePromptAdmin2FA(){
+  if(!navigator.onLine || !ME || ME.papel!=='admin') return;
+  try{
+    const { data:aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+    // nextLevel 'aal1' = nenhum fator verificado ainda.
+    if(aal && aal.nextLevel==='aal1'){
+      setTimeout(()=>{ try{ open2FA(true); }catch(_){} }, 800);
+    }
+  }catch(_){}
 }
 
 // ======================= NAV / BACKOFFICE =======================
@@ -979,7 +1128,8 @@ let PDV={ses:null,items:[],cust:null,disc:0,sur:0,cb:0,mpct:0,sel:-1,
   terminal:'CAIXA-1',busy:false,keysOn:false,lastSale:null,scanStop:null,
   held:[],opps:[],pix:null,pixPoll:null,_found:[],pickups:[],pickupLoading:false,
   approval:null,pickupTimer:null,pickupKnown:null,terminals:[],daily:null,
-  delivPix:[],delivPixLoading:false,delivPixKnown:null,delivPixDraft:null,delivPixUnavailable:false};
+  delivPix:[],delivPixLoading:false,delivPixKnown:null,delivPixDraft:null,delivPixUnavailable:false,
+  credPix:[],credPixLoading:false,credPixUnavailable:false};
 
 function isCashier(){return !!(ME&&(ME.is_cashier||ME.is_admin));}
 function pdvNum(v){
@@ -1282,6 +1432,81 @@ async function pdvLoadDeliveryPixQueue(silent){
   }catch(e){const m=String((e&&e.message)||e||'');if(/pdv_delivery_pix_queue|PGRST202|schema cache/i.test(m)){PDV.delivPixUnavailable=true;console.warn('Fila PIX de entrega aguarda a migração do banco.');}else{console.error(e);if(!silent)toast(pdvErr(e));}}
   finally{PDV.delivPixLoading=false;}
 }
+// ===== Fila de PIX de crediário (espelha o PIX de entrega) =====
+// O operador envia o PIX ao WhatsApp do cliente; a cobrança fica em espera aqui.
+// Quando o cliente paga, o cartão pisca; ao clicar, o recebimento é confirmado
+// (erp_receivables_pay via RPC), sai o comprovante e entra na sessão de caixa.
+function pdvCredPixReady(){return (PDV.credPix||[]).filter(x=>x.status==='paid');}
+function pdvCredPixQueueHtml(){
+  if(!PDV.ses||PDV.ses.status!=='aberto'||!PDV.credPix.length)return '';
+  return '<div class="pdv-pickups pdv-cred-pix"><div class="pdv-pickups-head"><span>🧾 Crediário aguardando PIX</span>'
+    +'<span class="pdv-chip">'+PDV.credPix.length+'</span></div><div class="pdv-pickups-list">'
+    +PDV.credPix.map(o=>{const paid=o.status==='paid';const d=new Date(o.created_at);const tm=isNaN(d)?'':d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+      return '<article class="pdv-pickup-card '+(paid?'pix-paid':'pix-wait')+'"><div class="pdv-pickup-top"><span class="pdv-pickup-num">'+(paid?'✅ PIX pago':'⏳ Aguardando PIX')+'</span><span class="pdv-pickup-time">'+esc(tm)+'</span></div>'
+        +'<div class="pdv-pickup-name">'+esc(o.customer||'Cliente')+'</div><div class="pdv-pickup-pay">Crediário · '+BRL(o.amount||0)+'</div>'
+        +'<button class="pdv-btn" '+(paid?'data-onclick="pdvFinalizeCredPix(\''+esc(o.id)+'\')"':'data-onclick="pdvCredPixQueueModal()"')+'>'+(paid?'Confirmar recebimento':'Ver / reenviar PIX')+'</button></article>';
+    }).join('')+'</div></div>';
+}
+async function pdvLoadCredPixQueue(silent){
+  if(PDV.credPixUnavailable)return;
+  if(!sb||!PDV.ses||PDV.ses.status!=='aberto'||PDV.ses.offline){PDV.credPix=[];return;}
+  if(PDV.credPixLoading)return;PDV.credPixLoading=true;
+  try{
+    const {data,error}=await sb.rpc('pdv_receivables_pix_queue',{p_session:PDV.ses.id});if(error)throw error;
+    let next=Array.isArray(data)?data:[];
+    const oldById=new Map(PDV.credPix.map(o=>[o.id,o]));
+    const before=JSON.stringify(PDV.credPix.map(o=>[o.id,o.status,o.amount]));
+    PDV.credPix=next;
+    const newlyPaid=next.find(o=>o.status==='paid'&&(!oldById.has(o.id)||oldById.get(o.id).status!=='paid'));
+    if(newlyPaid&&!silent)toast('✅ PIX do crediário confirmado · clique para receber');
+    const pending=next.filter(o=>o.status==='pending').slice(0,6);
+    if(pending.length){
+      await Promise.all(pending.map(o=>sb.functions.invoke('pdv-pix-payment',{body:{action:'status',intentId:o.id,paymentId:o.payment_id||null}}).catch(()=>null)));
+      if(!silent){const again=await sb.rpc('pdv_receivables_pix_queue',{p_session:PDV.ses.id});if(!again.error&&Array.isArray(again.data))PDV.credPix=again.data;}
+    }
+    const after=JSON.stringify(PDV.credPix.map(o=>[o.id,o.status,o.amount]));
+    if(before!==after&&currentPage==='caixa'&&!document.getElementById('pdvOv'))renderCaixa();
+  }catch(e){const m=String((e&&e.message)||e||'');if(/pdv_receivables_pix_queue|PGRST202|schema cache/i.test(m)){PDV.credPixUnavailable=true;console.warn('Fila PIX de crediário aguarda a migração do banco.');}else{console.error(e);if(!silent)toast(pdvErr(e));}}
+  finally{PDV.credPixLoading=false;}
+}
+function pdvCredPixQueueModal(){
+  const list=PDV.credPix||[];
+  pdvModal('Crediário aguardando PIX 🧾',list.length?'<div class="pdv-list"><table><thead><tr><th>Cliente</th><th>Status</th><th class="r">Valor</th><th></th></tr></thead><tbody>'
+    +list.map(o=>'<tr><td><b>'+esc(o.customer||'Cliente')+'</b><br><span class="pdv-note">'+fmtDT(o.created_at)+'</span></td><td>'+(o.status==='paid'?'<span class="pdv-tag ok">PIX pago</span>':'<span class="pdv-tag">aguardando</span>')+'</td><td class="r"><b>'+BRL(o.amount)+'</b></td><td class="r">'
+      +(o.status==='paid'?'<button class="pdv-btn solid mini" data-onclick="pdvFinalizeCredPix(\''+o.id+'\')">Confirmar recebimento</button>':'<button class="pdv-btn ghost mini" data-onclick="pdvResendCredPix(\''+o.id+'\')">📲 Reenviar PIX</button>')+'</td></tr>').join('')
+    +'</tbody></table></div>':'<div class="pdv-note">Nenhum crediário aguardando PIX.</div>',true);
+}
+function pdvResendCredPix(id){
+  const o=(PDV.credPix||[]).find(x=>x.id===id);if(!o)return;
+  const phone=String(o.phone||'').replace(/\D/g,'').replace(/^55/,'');
+  if(!o.qr_code){toast('O código PIX ainda não está disponível');return;}
+  const msg='Olá, '+(o.customer||'')+'! Segue o PIX para o pagamento do seu crediário, no valor de '+BRL(o.amount)+':\n\n'+o.qr_code+'\n\nAssim que o pagamento for confirmado, sua parcela é quitada automaticamente.';
+  if(phone)window.open('https://wa.me/55'+phone+'?text='+encodeURIComponent(msg),'_blank');
+  else if(navigator.clipboard)navigator.clipboard.writeText(o.qr_code).then(()=>toast('PIX copiado · cliente sem telefone cadastrado'));
+}
+async function pdvFinalizeCredPix(id){
+  const o=(PDV.credPix||[]).find(x=>x.id===id);if(!o||o.status!=='paid')return;
+  if(PDV.busy)return;PDV.busy=true;
+  try{
+    const {data,error}=await sb.rpc('pdv_receivables_pix_finalize',{p_intent:id});
+    if(error)throw error;
+    const r=data||{};
+    // tira da fila local e atualiza caixa/crediário
+    PDV.credPix=(PDV.credPix||[]).filter(x=>x.id!==id);
+    pdvCloseModal();
+    try{ if(typeof refreshCash==='function') refreshCash(); }catch(_){}
+    try{ if(typeof loadCrediario==='function' && currentPage==='crediario') loadCrediario(); }catch(_){}
+    renderCaixa();
+    // Comprovante: confirmação do recebimento (mesmo card do recebimento no caixa).
+    PDV_CRED.cust={ id:o.customer_id, nome:o.customer||'Cliente' };
+    pdvCredDone({ recebido:r.recebido||o.amount, parcelas_pagas:r.parcelas_pagas||0, saldo:r.saldo||0, saldo_vencimento:r.saldo_vencimento });
+    await pdvLoadCredPixQueue(true);
+  }catch(e){console.error(e);toast(pdvErr(e));}
+  finally{PDV.busy=false;}
+}
+window.pdvCredPixQueueModal=pdvCredPixQueueModal;
+window.pdvResendCredPix=pdvResendCredPix;
+window.pdvFinalizeCredPix=pdvFinalizeCredPix;
 function pdvOpenPickupOrder(id){if(id)pdvPickupFromCode('petshop:order:'+id);}
 async function pdvLoadPickupQueue(silent){
   if(!sb||!PDV.ses||PDV.ses.status!=='aberto'||PDV.ses.offline){PDV.pickups=[];PDV.pickupKnown=null;return;}
@@ -1305,8 +1530,8 @@ async function pdvLoadPickupQueue(silent){
 }
 function pdvStartPickupUpdates(){
   clearInterval(PDV.pickupTimer);
-  PDV.pickupTimer=setInterval(()=>{if(currentPage==='caixa'){pdvLoadPickupQueue(true);if(!PDV.delivPixUnavailable)pdvLoadDeliveryPixQueue(false);pdvDelivCount();}},10000);
-  pdvDelivCount();pdvLoadDeliveryPixQueue(true);
+  PDV.pickupTimer=setInterval(()=>{if(currentPage==='caixa'){pdvLoadPickupQueue(true);if(!PDV.delivPixUnavailable)pdvLoadDeliveryPixQueue(false);if(!PDV.credPixUnavailable)pdvLoadCredPixQueue(false);pdvDelivCount();}},10000);
+  pdvDelivCount();pdvLoadDeliveryPixQueue(true);pdvLoadCredPixQueue(true);
 }
 // mantém na fila de entrega do PDV apenas os pedidos do dia (fila/rota/entregues de hoje)
 function pdvDelivKeepToday(d){
@@ -1400,7 +1625,7 @@ function renderCaixa(){
     +'</div>'
 
     +'<div class="pdv-work">'
-    +'<div class="pdv-grid">'+pdvPickupQueueHtml()+pdvDeliveryPixQueueHtml()+'<div class="g-scroll'+(PDV.items.length?'':' empty')+'">'
+    +'<div class="pdv-grid">'+pdvPickupQueueHtml()+pdvDeliveryPixQueueHtml()+pdvCredPixQueueHtml()+'<div class="g-scroll'+(PDV.items.length?'':' empty')+'">'
       +(PDV.items.length
         ?'<table><thead><tr><th>Item</th><th>Código</th><th>Descrição</th>'
           +'<th class="r">Quantidade</th><th>Unidade</th><th class="r">Unitário/Kg R$</th>'
@@ -2555,6 +2780,7 @@ function pdvCredRender(){
         +'<button class="pdv-btn" style="flex:1 1 45%;background:#60a5fa" data-onclick="pdvCredPay(\'debito\')">💳 Débito</button>'
         +'<button class="pdv-btn" style="flex:1 1 45%;background:#60a5fa" data-onclick="pdvCredPay(\'credito\')">💳 Crédito</button>'
         +'<button class="pdv-btn" style="flex:1 1 45%;background:#7ee2a8;color:#12307a" data-onclick="pdvCredPay(\'pix\')">⚡ PIX</button>'
+        +'<button class="pdv-btn" style="flex:1 1 100%;background:#12b76a;color:#fff" data-onclick="pdvSendCredPix()">📲 Enviar PIX ao cliente (WhatsApp)</button>'
       +'</div>'
       +'<button class="pdv-btn ghost" style="width:100%;margin-top:6px" data-pdv-close>Fechar (ESC)</button>'
     +'</div></div>', true);
@@ -2647,6 +2873,67 @@ async function pdvCredMaquininha(tipo, termId){
     posFlowRequest(r.id, (+r.valor||ctx.pago), termId, tipo, 'crediario');
   }catch(e){ PDV.busy=false; console.error(e); toast(pdvErr(e)); }
 }
+// Envia o PIX do crediário para o WhatsApp do cliente. A cobrança fica em espera
+// na fila de crediário do caixa; quando o cliente paga, o cartão pisca e o
+// operador confirma o recebimento (comprovante + entrada no caixa).
+window.pdvSendCredPix = async ()=>{
+  const sel=pdvCredSel(); if(!sel.length){ toast('Marque pelo menos uma parcela'); return; }
+  const tot=pdvCredSelTotal();
+  const pago=round2(pdvNum((document.getElementById('pdvCrVal')||{}).value));
+  if(!(pago>0)){ toast('Informe o valor recebido'); return; }
+  if(pago>tot+0.005){ toast('O valor recebido é maior que o total selecionado'); return; }
+  if(PDV.credPixUnavailable){ toast('Atualize o banco do ONPDV antes de usar o PIX de crediário',true); return; }
+  if(!navigator.onLine){ toast('O PIX exige internet',true); return; }
+  if(!PDV.ses||PDV.ses.status!=='aberto'){ toast('Abra o caixa para enviar o PIX',true); return; }
+  const vsaldo=((document.getElementById('pdvCrSaldoVenc')||{}).value)||null;
+  const resto=round2(tot-pago);
+  if(resto>0.009 && !await uiConfirm('Enviar PIX de '+BRL(pago)+' de '+BRL(tot)+'.\n\nO restante de '+BRL(resto)+' vira uma nova cobrança quando o cliente pagar. Confirmar?')) return;
+  const c=PDV_CRED.cust||{};
+  const ids=sel.map(p=>p.id);
+  const phone=String(c.telefone||'').replace(/\D/g,'').replace(/^55/,'');
+  const nome=c.nome||'Cliente';
+  if(PDV.busy) return; PDV.busy=true;
+  const b=document.activeElement; const bTxt=(b&&b.tagName==='BUTTON')?b.textContent:null;
+  if(b&&b.tagName==='BUTTON'){ b.disabled=true; b.textContent='Gerando PIX...'; }
+  try{
+    const { data, error } = await sb.functions.invoke('pdv-pix-payment',{ body:{ action:'create', kind:'crediario', sessionId:PDV.ses.id, customerId:c.id,
+      recv:{ ids, valor:pago, venc_saldo:vsaldo }, payer:{ name:nome, email:(c.email||'') } } });
+    if(error) throw error; if(!data||!data.ok) throw new Error((data&&data.error)||'Não foi possível gerar o PIX');
+    pdvCloseModal();
+    await pdvLoadCredPixQueue(false); if(currentPage==='caixa') renderCaixa();
+    pdvCredPixResultModal({ qrCode:data.qrCode||'', qrCodeBase64:data.qrCodeBase64||'', total:data.total, phone, nome });
+  }catch(e){ console.error(e); toast(pdvErr(e)); }
+  finally{ PDV.busy=false; if(b&&b.tagName==='BUTTON'&&b.isConnected){ b.disabled=false; if(bTxt!=null) b.textContent=bTxt; } }
+};
+function pdvCredPixResultModal(o){
+  o=o||{};
+  const waMsg='Olá, '+(o.nome||'')+'! Segue o PIX para o pagamento do seu crediário, no valor de '+BRL(o.total)
+    +':\n\n'+(o.qrCode||'')+'\n\nAssim que o pagamento for confirmado, sua parcela é quitada automaticamente.';
+  PDV._credPixWaMsg=waMsg;
+  pdvModal('PIX do crediário gerado 🧾',
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;align-items:start">'
+      +'<div class="pdv-qr">'+(o.qrCodeBase64?'<img alt="QR Code PIX" src="data:image/png;base64,'+o.qrCodeBase64+'">':'<div class="pdv-note">QR indisponível — use o código copia e cola ao lado.</div>')+'</div>'
+      +'<div>'
+        +'<div class="pdv-status-wait">⏳ Aguardando o pagamento · '+BRL(o.total)+'</div>'
+        +'<div class="pdv-note" style="margin:10px 0">Assim que o Mercado Pago confirmar, o crediário <b>pisca no caixa</b> em “Crediário aguardando PIX”. Clique para confirmar o recebimento e sair o comprovante.</div>'
+        +(o.qrCode?'<textarea class="pdv-in" id="pdvCrPixCode" readonly style="height:72px;font-size:11px">'+esc(o.qrCode)+'</textarea>'
+          +'<button class="pdv-btn" style="width:100%;margin-top:7px" data-onclick="pdvCopyCredPix()">📋 Copiar código PIX</button>':'')
+        +(o.phone?'<button class="pdv-btn pix" style="width:100%;margin-top:7px;background:#12b76a;color:#fff" data-onclick="pdvCredPixWhats(\''+o.phone+'\')">📲 Enviar no WhatsApp</button>'
+          :'<div class="pdv-note" style="margin-top:7px">Cliente sem telefone cadastrado — copie o código e envie você mesmo.</div>')
+      +'</div>'
+    +'</div>'
+    +'<div class="pdv-btns"><button class="pdv-btn ghost" data-pdv-close>Fechar</button></div>',true);
+}
+function pdvCopyCredPix(){
+  const e=document.getElementById('pdvCrPixCode');if(!e)return;
+  if(navigator.clipboard)navigator.clipboard.writeText(e.value).then(()=>toast('PIX copiado ✓'));
+  else{e.select();document.execCommand('copy');toast('PIX copiado ✓');}
+}
+function pdvCredPixWhats(phone){
+  window.open('https://wa.me/55'+String(phone).replace(/\D/g,'')+'?text='+encodeURIComponent(PDV._credPixWaMsg||''),'_blank');
+}
+window.pdvCopyCredPix=pdvCopyCredPix;
+window.pdvCredPixWhats=pdvCredPixWhats;
 async function posFlowRequest(reqId, total, terminalId, tipo, kind){
   window._posSettled=false; window._posKind=kind||'venda'; window._posSnap=null;
   const tipoLbl={credito:'Crédito',debito:'Débito',pix:'PIX'}[tipo]||tipo;
@@ -5138,7 +5425,9 @@ function tvRender(){
   const deltaHtml=(cur,prev)=>{ if(!(prev>0)) return (cur>0?'<span style="color:#2fd27a">novo</span>':'<span style="color:#8aa">—</span>');
     const p=Math.round((cur-prev)/prev*100), up=p>=0;
     return `<span style="color:${up?'#2fd27a':'#ff6b6b'}">${up?'▲':'▼'} ${Math.abs(p)}%</span>`; };
-  const lojas=(d.lojas||[]).slice().sort(isMes
+  const _activeStoreIds=new Set((STORES||[]).map(s=>s.id));
+  const _storeAtivo=(sid)=>!_activeStoreIds.size || _activeStoreIds.has(sid);   // sem STORES carregadas, não esconde nada
+  const lojas=(d.lojas||[]).filter(l=>_storeAtivo(l.store_id)).slice().sort(isMes
     ?(a,b)=>(+((goalsByStore[b.store_id]||{}).realizado)||0)-(+((goalsByStore[a.store_id]||{}).realizado)||0)
     :(a,b)=>(+b.total||0)-(+a.total||0));
   const ticket=(+d.total_geral||0)/Math.max(1,+d.qtd_geral||0);
@@ -6187,13 +6476,47 @@ window.userSave = async (id)=>{
 
 $('#btnNewStore').onclick = ()=> storeForm();
 async function renderStores(){
-  await loadStores();
-  $('#storeBody').innerHTML = STORES.map(s=>`
-    <tr><td><b>${esc(s.nome)}</b></td><td>${esc(s.cnpj||'—')}</td><td>${esc(s.uf||'—')}</td>
+  // A tela de config mostra TODAS as lojas (inclusive inativas) para o admin
+  // poder reativar; o resto do app usa STORES, que só traz as ativas.
+  let all=[];
+  try{
+    const r = await sb.from('stores').select('*').order('ativo',{ascending:false}).order('nome');
+    if(r.error) throw r.error; all=r.data||[];
+  }catch(e){ await loadStores(); all=(STORES||[]).slice(); }
+  $('#storeBody').innerHTML = all.map(s=>{
+    const on = s.ativo!==false;
+    return `<tr class="${on?'':'store-off'}"><td><b>${esc(s.nome)}</b>${s.is_matriz?' <span class="chip">★ matriz</span>':''}</td><td>${esc(s.cnpj||'—')}</td><td>${esc(s.uf||'—')}</td>
       <td>${esc(s.regime||'—')}</td><td>${s.ambiente_fiscal==='producao'?'<span class="chip ok">produção</span>':'<span class="chip amber">homologação</span>'}</td>
-      <td class="r"><button class="btn ghost sm" data-onclick='storeForm(${JSON.stringify(s).replace(/'/g,"&#39;")})'>Editar</button></td></tr>`).join('')
-    || '<tr><td colspan="6" class="muted" style="text-align:center;padding:16px">Nenhuma loja.</td></tr>';
+      <td>${on?'<span class="chip ok">ativa</span>':'<span class="chip amber">inativa</span>'}</td>
+      <td class="r" style="white-space:nowrap"><button class="btn ghost sm" data-onclick='storeForm(${JSON.stringify(s).replace(/'/g,"&#39;")})'>Editar</button>
+        <button class="btn ghost sm" data-onclick="toggleStoreActive('${s.id}',${on?'false':'true'})">${on?'Desativar':'Ativar'}</button></td></tr>`;
+  }).join('')
+    || '<tr><td colspan="7" class="muted" style="text-align:center;padding:16px">Nenhuma loja.</td></tr>';
+  // mantém STORES (só ativas) e o seletor de loja em sincronia com o resto do app
+  await loadStores();
 }
+window.toggleStoreActive = async (id, ativo)=>{
+  ativo = (ativo===true||ativo==='true');
+  let nome=''; try{ const {data}=await sb.from('stores').select('nome').eq('id',id).maybeSingle(); nome=(data&&data.nome)||''; }catch(_){}
+  if(!ativo){
+    // Não deixa desativar a última loja ativa (o app precisa de pelo menos uma).
+    const ativas=(STORES||[]).filter(s=>s.ativo!==false).length;
+    if(ativas<=1){ toast('Não é possível desativar a última loja ativa.',true); return; }
+    if(!await uiConfirm('Desativar a loja "'+(nome||'')+'"?\n\nEla some de todas as telas, seletores e relatórios enquanto estiver inativa. O histórico é preservado e você pode reativá-la a qualquer momento.',{danger:true,okText:'Desativar'})) return;
+  }
+  const { error } = await sb.from('stores').update({ ativo }).eq('id', id);
+  if(error){ toast('Erro: '+error.message,true); return; }
+  // loadStores() re-busca as ativas e atualiza o cache + o seletor de loja.
+  await loadStores();
+  if(!ativo && CURRENT_STORE===id){
+    CURRENT_STORE = (STORES[0]&&STORES[0].id)||null;
+    const sel=$('#storeSel'); if(sel&&CURRENT_STORE) sel.value=CURRENT_STORE;
+    try{ await loadProducts(); buildPdvCatalog(); }catch(_){}
+    startPortalPaymentsWatch();
+  }
+  toast(ativo?'Loja reativada ✓':'Loja desativada — sumiu das telas');
+  renderStores();
+};
 let STORE_MAP=null, STORE_MARKER=null;
 window.storeForm = (s={})=>{
   storeMapDestroy();
@@ -6209,6 +6532,9 @@ window.storeForm = (s={})=>{
         <div class="field"><label class="lbl">Ambiente fiscal</label><select id="stAmb" class="in">
           <option value="homologacao" ${s.ambiente_fiscal!=='producao'?'selected':''}>homologação</option>
           <option value="producao" ${s.ambiente_fiscal==='producao'?'selected':''}>produção</option></select></div>
+        <div class="field"><label class="lbl">Situação</label><select id="stAtivo" class="in">
+          <option value="true" ${s.ativo!==false?'selected':''}>ativa (aparece em todas as telas)</option>
+          <option value="false" ${s.ativo===false?'selected':''}>inativa (some das telas)</option></select></div>
       </div>
 
       <h4 style="margin:16px 0 8px;font-size:14px">📍 Endereço da loja</h4>
@@ -6314,10 +6640,17 @@ window.storeBuscaCep = async ()=>{
 window.saveStore = async (id)=>{
   const nome=$('#stNome').value.trim(); if(!nome){ toast('Informe o nome.',true); return; }
   const numf=v=>{ v=parseFloat(v); return isFinite(v)?v:null; };
+  const stAtivoEl=$('#stAtivo');
   const rec={ nome, cnpj:$('#stCnpj').value, ie:$('#stIe').value, uf:$('#stUf').value.toUpperCase(),
     municipio:$('#stMun').value, regime:$('#stReg').value, ambiente_fiscal:$('#stAmb').value,
     cep:$('#stCep').value, endereco:$('#stEnd').value, numero:$('#stNum').value, bairro:$('#stBairro').value,
     telefone:$('#stTel').value, lat:numf($('#stLat').value), lng:numf($('#stLng').value) };
+  if(stAtivoEl) rec.ativo = (stAtivoEl.value==='true');
+  // Trava: não deixa salvar a última loja como inativa.
+  if(id && rec.ativo===false){
+    const ativas=(STORES||[]).filter(s=>s.ativo!==false && s.id!==id).length;
+    if(ativas<1){ toast('Não é possível deixar a última loja ativa como inativa.',true); return; }
+  }
   const { error } = id ? await sb.from('stores').update(rec).eq('id',id) : await sb.from('stores').insert(rec);
   if(error){ toast('Erro: '+error.message,true); return; }
   storeMapDestroy(); closeModal(); toast('Loja salva'); renderStores();

@@ -730,3 +730,17 @@ body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filte
    .sum, .grid2, .field, tabelas). Nenhuma classe própria é necessária. */
 #page-cmpPedido>.card+.card,#page-cmpCotacoes>.card+.card,#page-cmpHistorico>.card+.card{margin-top:16px}
 .cmp-po-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+
+/* Loja inativa na tabela de Configurações: linha esmaecida (o toggle Ativar reverte). */
+#storeBody tr.store-off{opacity:.55}
+#storeBody tr.store-off td b{text-decoration:line-through}
+
+/* Fila de PIX de crediário no caixa (espelha o PIX de entrega, com tom próprio). */
+.pdv-cred-pix{background:#eafaf1;border-bottom-color:#67c99a}
+
+/* Passo do 2FA no login: esconde e-mail/senha e mostra só o desafio do autenticador. */
+#login .box.mfa-step .field,
+#login .box.mfa-step #btnLogin,
+#login .box.mfa-step .login-help,
+#login .box.mfa-step .login-links,
+#login .box.mfa-step #liMsg{display:none}

@@ -56,6 +56,16 @@
     <p class="muted login-help">Contas são criadas somente pelo administrador.</p>
     <div class="login-links"><button id="btnResetPassword" class="link-button" type="button">Esqueci minha senha</button><a href="cliente.html">Portal do Cliente</a></div>
     <p id="liMsg" class="muted login-message" role="status" aria-live="polite"></p>
+
+    <!-- ===== 2FA (verificação em duas etapas) — aparece só quando exigido ===== -->
+    <div id="li2fa" class="hide" style="margin-top:6px">
+      <div class="field"><label class="lbl" for="li2faCode">Código do app autenticador</label>
+        <input id="li2faCode" class="in" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="letter-spacing:.35em;text-align:center;font-size:20px"></div>
+      <button id="btn2faVerify" class="btn login-submit">Verificar e entrar</button>
+      <p class="muted login-help">Abra o Google Authenticator / Authy e digite o código de 6 dígitos.</p>
+      <div class="login-links"><button id="btn2faCancel" class="link-button" type="button">Cancelar</button></div>
+      <p id="li2faMsg" class="muted login-message" role="status" aria-live="polite"></p>
+    </div>
   </div>
 </div>
 

@@ -104,6 +104,7 @@
           <span id="whoName" class="bo-user">—</span>
           <button id="btnTvPanel" class="btn ghost sm" title="Painel para TV (metas do dia)">📺 TV</button>
           <button id="btnMyPass" class="btn ghost sm" title="Trocar a minha senha">🔑 Senha</button>
+          <button id="btn2fa" class="btn ghost sm" title="Verificação em duas etapas" data-onclick="open2FA()">🔒 2FA</button>
           <button id="btnLogout" class="btn ghost sm">Sair</button>
         </div>
       </header>
@@ -982,7 +983,7 @@
       </div>
       <div class="card pad u-static-15" id="cardPdvInstaller">
         <div class="head"><h2>🛒 Instalador da Frente de Caixa</h2><span class="grow"></span>
-          <span class="chip ok">2026.08.25 · v36</span>
+          <span class="chip ok">2026.09.04 · v51</span>
           <a class="btn" href="downloads/onpdv-caixa.bat" download="onpdv-caixa.bat">⬇ Baixar ONPDV Caixa</a></div>
         <p class="muted u-static-56">
           Baixe este instalador em cada computador de venda. Ele instala o componente
@@ -993,7 +994,7 @@
         <div class="head"><h2>🏪 Lojas / Empresas</h2><span class="grow"></span>
           <button class="btn" id="btnNewStore">+ Nova loja</button></div>
         <div class="tbl-wrap"><table>
-          <thead><tr><th>Nome</th><th>CNPJ</th><th>UF</th><th>Regime</th><th>Ambiente fiscal</th><th></th></tr></thead>
+          <thead><tr><th>Nome</th><th>CNPJ</th><th>UF</th><th>Regime</th><th>Ambiente fiscal</th><th>Status</th><th></th></tr></thead>
           <tbody id="storeBody"></tbody></table></div>
       </div>
       <div class="card pad u-static-15">

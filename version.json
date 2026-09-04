@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.01-v50",
+  "version": "2026.09.04-v51",
   "installer": "/downloads/onpdv-caixa.bat",
-  "notes": "Raio-X Financeiro: a margem bruta passa a ser medida pelo próprio sistema (itens vendidos com custo, ou giro × custo cadastrado) em vez de digitada. O CMV é apurado mês a mês pela melhor fonte disponível, e cada mês declara de onde veio a margem."
+  "notes": "PIX no crediário: envie o PIX ao WhatsApp do cliente e a cobrança vai para a espera; quando o cliente paga, o crediário pisca e, ao abrir, o recebimento é confirmado com comprovante e entra no caixa. Lojas agora têm liga/desliga: loja inativa some de todas as telas. 2FA por app autenticador (TOTP) para o administrador."
 }
