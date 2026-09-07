@@ -1,0 +1,19 @@
+{
+  "id": "onpdv-vitrine",
+  "name": "Vitrine — Display do Cliente",
+  "short_name": "Vitrine",
+  "description": "Segunda tela do cliente: itens da compra ao vivo e cashback por CPF.",
+  "lang": "pt-BR",
+  "start_url": "./vitrine.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#12307a",
+  "theme_color": "#12307a",
+  "categories": ["business"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

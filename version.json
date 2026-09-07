@@ -1,0 +1,5 @@
+{
+  "version": "2026.09.07-v54",
+  "installer": "/downloads/onpdv-caixa.bat",
+  "notes": "Robustez de pagamentos: cobranças PIX abandonadas expiram sozinhas e a Central de Decisão avisa quando um PIX pago ainda não entrou no caixa. Configurações ganham um liga/desliga da cobrança automática de crediário vencido por PIX no WhatsApp (vem desligada). Correções de segurança e endurecimento acumulados das versões anteriores."
+}

@@ -1,0 +1,19 @@
+{
+  "id": "./cliente.html",
+  "name": "ONPDV Cliente",
+  "short_name": "ONPDV",
+  "description": "Portal do cliente ONPDV — compras, cashback, contas e carteirinha dos pets.",
+  "lang": "pt-BR",
+  "start_url": "./cliente.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef1f8",
+  "theme_color": "#12307a",
+  "categories": ["shopping", "lifestyle"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

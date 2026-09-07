@@ -1,0 +1,25 @@
+ONPDV — PACOTE DE PUBLICAÇÃO DO SITE · versão 2026.09.07-v54
+============================================================
+
+O QUE FAZER
+-----------
+Suba TODO o conteúdo desta pasta para a raiz do site (Vercel), mantendo as
+subpastas assets, downloads, icons, lib e partials. Arquivo inicial: index.html.
+
+Ao publicar, o version.json avisa os caixas já instalados que saiu a v54.
+
+O QUE JÁ ESTÁ NO AR (não faz parte deste pacote)
+------------------------------------------------
+- Backend Supabase (tabelas, funções, edge functions, cron): já aplicado ao vivo
+  durante o desenvolvimento. Nada a subir aqui.
+
+PENDÊNCIAS MANUAIS NO PAINEL (fora deste pacote)
+------------------------------------------------
+1. Supabase → Authentication: ligar 2FA por app autenticador (TOTP) e a
+   proteção contra senha vazada (HaveIBeenPwned).
+2. (Opcional) Cobrança automática de crediário por PIX no WhatsApp: vem
+   DESLIGADA. Ligue em Configurações → "Cobrança automática por PIX", depois
+   de conferir o texto e testar com uma parcela real. Exige o provedor de
+   WhatsApp configurado (secrets WA_API_URL / WA_API_TOKEN).
+
+Detalhes de engenharia ficam no repositório (MANUTENCAO.md), fora deste pacote.
