@@ -9067,37 +9067,55 @@ async function renderTerminals(){
   const { data } = await sb.from('pos_terminals').select('*').eq('ativo',true).eq('finalidade','pagamento').eq('provedor','mercadopago').order('nome');
   TERMINALS = data||[];
   $('#termBody').innerHTML = TERMINALS.map(t=>{
+    const st=(STORES||[]).find(s=>s.id===t.store_id);
+    const storeCell = st
+      ? esc(st.nome)+(st.is_matriz?' ★':'')
+      : '<span class="chip red" style="font-size:10px" title="Sem loja: cobra pela conta Mercado Pago padrão">Sem loja</span>';
     return `
     <tr>
       <td><b>${esc(t.nome)}</b><br><span class="chip amber" style="font-size:10px">Mercado Pago Point</span></td>
       <td>Point${t.serial?`<br><span class="muted" style="font-size:11px">Série: ${esc(t.serial)}</span>`:''}</td>
       <td>${t.provider_terminal_id?`<code style="font-size:12px">${esc(t.provider_terminal_id)}</code>`:'<span class="muted" style="font-size:12px">usar Device ID global</span>'}</td>
+      <td>${storeCell}</td>
       <td class="muted">${t.last_seen? new Date(t.last_seen).toLocaleString('pt-BR') : 'nunca'}</td>
-      <td class="r"><button class="btn ghost sm red" data-onclick="delTerm('${t.id}')">Remover</button></td>
-    </tr>`;}).join('') || '<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">Nenhuma maquininha cadastrada.</td></tr>';
+      <td class="r"><button class="btn ghost sm" data-onclick="termEdit('${t.id}')">Editar</button> <button class="btn ghost sm red" data-onclick="delTerm('${t.id}')">Remover</button></td>
+    </tr>`;}).join('') || '<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">Nenhuma maquininha cadastrada.</td></tr>';
   loadTerminals();
 }
-window.termForm = ()=>{
+window.termEdit = (id)=>{ const t=(TERMINALS||[]).find(x=>x.id===id); if(t) termForm(t); };
+window.termForm = (t)=>{
+  const edit = !!(t && t.id);
+  const storeOpts = (STORES||[]).map(s=>
+    `<option value="${s.id}"${(edit ? t.store_id===s.id : s.id===CURRENT_STORE)?' selected':''}>${esc(s.nome)}${s.is_matriz?' ★':''}</option>`).join('');
   modal(`
-    <div class="m-head"><h3>Nova maquininha · Mercado Pago Point</h3><button data-modal-close>×</button></div>
+    <div class="m-head"><h3>${edit?'Editar':'Nova'} maquininha · Mercado Pago Point</h3><button data-modal-close>×</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Nome *</label><input id="tfNome" class="in" placeholder="Ex: Caixa 1"></div>
+      <div class="field"><label class="lbl">Nome *</label><input id="tfNome" class="in" placeholder="Ex: Caixa 1" value="${edit?esc(t.nome||''):''}"></div>
+      <div class="field"><label class="lbl">Loja *</label>
+        <select id="tfStore" class="in">${storeOpts||'<option value="">(nenhuma loja ativa)</option>'}</select>
+        <p class="muted" style="font-size:12px;margin-top:4px">Cada maquininha cobra pela <b>conta Mercado Pago da sua loja</b>. Sem loja definida, usa a conta padrão do sistema.</p></div>
       <div class="field"><label class="lbl">Device ID do Point</label>
-        <input id="tfDevice" class="in" placeholder="ex.: PAX_A910__SMARTPOS1234567890">
+        <input id="tfDevice" class="in" placeholder="ex.: PAX_A910__SMARTPOS1234567890" value="${edit?esc(t.provider_terminal_id||''):''}">
         <p class="muted" style="font-size:12px;margin-top:4px">No aparelho, ative o modo <b>PDV/Integrado</b> e copie o Device ID no app do vendedor do Mercado Pago. Deixe em branco para usar o Device ID global (Config → Mercado Pago Point).</p></div>
-      <div class="field"><label class="lbl">Serial (opcional)</label><input id="tfSerial" class="in"></div>
+      <div class="field"><label class="lbl">Serial (opcional)</label><input id="tfSerial" class="in" value="${edit?esc(t.serial||''):''}"></div>
     </div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button>
-      <button class="btn" data-onclick="saveTerm()">Criar</button></div>`);
+      <button class="btn" data-onclick="saveTerm(${edit?`'${t.id}'`:''})">${edit?'Salvar':'Criar'}</button></div>`);
 };
-window.saveTerm = async ()=>{
+window.saveTerm = async (id)=>{
   const nome=$('#tfNome').value.trim(); if(!nome){ toast('Informe o nome.',true); return; }
-  const row={ nome, provedor:'mercadopago', finalidade:'pagamento', modelo:'point',
+  const store_id=($('#tfStore')&&$('#tfStore').value)||null;
+  const row={ nome, store_id: store_id||null,
     serial:$('#tfSerial').value||null,
     provider_terminal_id:($('#tfDevice').value||'').trim()||null };
-  const { error } = await sb.from('pos_terminals').insert(row);
+  let error;
+  if(id){ ({ error } = await sb.from('pos_terminals').update(row).eq('id',id)); }
+  else {
+    row.provedor='mercadopago'; row.finalidade='pagamento'; row.modelo='point';
+    ({ error } = await sb.from('pos_terminals').insert(row));
+  }
   if(error){ toast('Erro: '+error.message,true); return; }
-  closeModal(); toast('Maquininha cadastrada'); renderTerminals();
+  closeModal(); toast(id?'Maquininha atualizada':'Maquininha cadastrada'); renderTerminals();
 };
 window.delTerm = async (id)=>{
   const { error } = await sb.from('pos_terminals').update({ ativo:false }).eq('id',id);
