@@ -1099,14 +1099,19 @@ window.go=function(){ if(typeof exitPdv==='function')exitPdv(); };
 // ===== Cobrança na maquininha Mercado Pago Point =====
 // O operador escolhe no caixa: débito, crédito ou PIX. A cobrança vai direto
 // para o visor da maquininha (edge function pos-cloud-charge → Mercado Pago Point).
+function pdvCaixaCfg(){ try{ return (PDV.terminals||[]).find(t=>t.code===PDV.terminal)||null; }catch(e){ return null; } }
+function pdvBoundMachineId(){ const c=pdvCaixaCfg(); return (c&&c.payment_terminal_id)||null; }
+// Ids das maquininhas vinculadas a este caixa (N:N); cai no vínculo 1:1 legado.
+function pdvLinkedMachineIds(){ const c=pdvCaixaCfg(); if(c&&Array.isArray(c.machine_ids)&&c.machine_ids.length) return c.machine_ids.slice(); if(c&&c.payment_terminal_id) return [c.payment_terminal_id]; return []; }
+// Maquininhas visíveis para este caixa: as vinculadas (se houver), senão todas.
+function pdvMachinesFor(terms){ const ids=pdvLinkedMachineIds(); if(!ids.length) return (terms||[]).slice(); const set=new Set(ids); return (terms||[]).filter(t=>set.has(t.id)); }
 function pdvPickTerminal(tipo){
   tipo = tipo || 'credito';
   pdvModal('Escolha a maquininha 💳',
-    (TERMINALS||[]).map(t=>'<button class="pdv-btn" style="width:100%;margin:5px 0;text-align:left" data-onclick="pdvCloseModal();pdvMaquininha(\''+tipo+'\',\''+t.id+'\')">'
+    pdvMachinesFor(TERMINALS||[]).map(t=>'<button class="pdv-btn" style="width:100%;margin:5px 0;text-align:left" data-onclick="pdvCloseModal();pdvMaquininha(\''+tipo+'\',\''+t.id+'\')">'
       +'💳 '+esc(t.nome)+' <span style="opacity:.75;font-weight:600">· Mercado Pago Point</span></button>').join('')
     +'<button class="pdv-btn ghost" style="width:100%;margin-top:6px" data-pdv-close>Cancelar</button>', true);
 }
-function pdvBoundMachineId(){ try{ const c=(PDV.terminals||[]).find(t=>t.code===PDV.terminal); return (c&&c.payment_terminal_id)||null; }catch(e){ return null; } }
 async function pdvMaquininha(tipo, termId){
   tipo = tipo || 'credito';
   if(!PDV.items.length){toast('Nenhum item na venda');return;}
@@ -1115,9 +1120,7 @@ async function pdvMaquininha(tipo, termId){
   const terms=(TERMINALS||[]);
   if(!terms.length){toast('Cadastre uma maquininha em Config → Maquininhas');return;}
   let term = termId ? terms.find(t=>t.id===termId) : null;
-  if(!term){ const _bid=pdvBoundMachineId(); if(_bid) term=terms.find(t=>t.id===_bid)||null; }
-  if(!term) term = (terms.length===1?terms[0]:null);
-  if(!term){ pdvPickTerminal(tipo); return; }
+  if(!term){ const linked=pdvMachinesFor(terms); if(linked.length===1) term=linked[0]; else { pdvPickTerminal(tipo); return; } }
   if(PDV.busy)return; PDV.busy=true;
   const t=pdvTotals();
   const items=PDV.items.map(i=>({product_id:i.id,descricao:i.name,qtd:i.qty,preco_unit:i.price,custo_unit:0}));
@@ -2421,16 +2424,14 @@ function pdvDeliveryPayload(){
   return {end,frete,loja,obs,items,total:round2(items.reduce((a,i)=>a+i.qtd*i.preco_unit,0)+frete)};
 }
 function pdvPickDeliveryTerminal(tipo){
-  pdvModal('Escolha a maquininha 💳',(TERMINALS||[]).map(t=>'<button class="pdv-btn" style="width:100%;margin:5px 0;text-align:left" data-onclick="pdvDeliveryMachine(\''+tipo+'\',\''+t.id+'\')">💳 '+esc(t.nome)+' <span style="opacity:.75;font-weight:600">· Mercado Pago Point</span></button>').join('')
+  pdvModal('Escolha a maquininha 💳',pdvMachinesFor(TERMINALS||[]).map(t=>'<button class="pdv-btn" style="width:100%;margin:5px 0;text-align:left" data-onclick="pdvDeliveryMachine(\''+tipo+'\',\''+t.id+'\')">💳 '+esc(t.nome)+' <span style="opacity:.75;font-weight:600">· Mercado Pago Point</span></button>').join('')
     +'<button class="pdv-btn ghost" style="width:100%;margin-top:6px" data-onclick="pdvDeliveryModal()">Voltar</button>',true);
 }
 async function pdvDeliveryMachine(tipo,termId){
   if(PDV.busy)return;if(PDV.delivPixUnavailable){toast('Atualize o banco do ONPDV antes de transmitir a entrega para a maquininha');return;}
   const terms=TERMINALS||[];if(!terms.length){toast('Cadastre uma maquininha em Config → Maquininhas');return;}
   let term=termId?terms.find(t=>t.id===termId):null;
-  if(!term){const bid=pdvBoundMachineId();if(bid)term=terms.find(t=>t.id===bid)||null;}
-  if(!term&&terms.length===1)term=terms[0];
-  if(!term){pdvPickDeliveryTerminal(tipo);return;}
+  if(!term){ const linked=pdvMachinesFor(terms); if(linked.length===1) term=linked[0]; else { pdvPickDeliveryTerminal(tipo); return; } }
   let d;try{d=pdvDeliveryPayload();}catch(e){toast(e.message||String(e));return;}
   PDV.busy=true;
   try{
@@ -2866,8 +2867,9 @@ window.pdvCredPay = async (tipo)=>{
   }
   const terms=(TERMINALS||[]);
   if(!terms.length){ toast('Cadastre uma maquininha em Config → Maquininhas'); return; }
-  let term=null; const _bid=pdvBoundMachineId(); if(_bid) term=terms.find(t=>t.id===_bid)||null; if(!term) term=(terms.length===1?terms[0]:null);
-  if(!term){ pdvModal('Escolha a maquininha 💳', terms.map(t=>'<button class="pdv-btn" style="width:100%;margin:5px 0;text-align:left" data-onclick="pdvCloseModal();pdvCredMaquininha(\''+tipo+'\',\''+t.id+'\')">💳 '+esc(t.nome)+'</button>').join('')+'<button class="pdv-btn ghost" style="width:100%;margin-top:6px" data-pdv-close>Cancelar</button>', true); return; }
+  const linked=pdvMachinesFor(terms);
+  let term=(linked.length===1?linked[0]:null);
+  if(!term){ pdvModal('Escolha a maquininha 💳', linked.map(t=>'<button class="pdv-btn" style="width:100%;margin:5px 0;text-align:left" data-onclick="pdvCloseModal();pdvCredMaquininha(\''+tipo+'\',\''+t.id+'\')">💳 '+esc(t.nome)+'</button>').join('')+'<button class="pdv-btn ghost" style="width:100%;margin-top:6px" data-pdv-close>Cancelar</button>', true); return; }
   pdvCredMaquininha(tipo, term.id);
 };
 async function pdvCredMaquininha(tipo, termId){
@@ -3659,7 +3661,7 @@ async function renderPdvTerminalsConfig(){
     box.innerHTML=PDV.terminals.length?PDV.terminals.map((t,i)=>
       '<tr><td><b>'+esc(t.code)+'</b></td><td>'+esc(t.name)+'</td>'
       +'<td>'+esc(t.printer_name||'Padrão do Windows')+'</td><td>'+(+t.paper_mm===58?'58':'80')+' mm</td>'
-      +'<td>'+(t.payment_terminal_name?esc(t.payment_terminal_name):'&mdash;')+'</td>'+'<td>'+(t.active?'<span class="chip ok">ativo</span>':'<span class="chip warn">inativo</span>')+'</td>'
+      +'<td>'+((Array.isArray(t.machines)&&t.machines.length)?t.machines.map(function(m){return esc(m.nome);}).join(', '):(t.payment_terminal_name?esc(t.payment_terminal_name):'&mdash;'))+'</td>'+'<td>'+(t.active?'<span class="chip ok">ativo</span>':'<span class="chip warn">inativo</span>')+'</td>'
       +'<td class="r" style="white-space:nowrap"><button class="btn ghost sm" data-onclick="pdvTerminalForm('+i+')">Editar</button> '
       +'<button class="btn ghost sm red" data-onclick="pdvDeleteTerminal(\''+t.id+'\')">Excluir</button></td></tr>'
     ).join(''):'<tr><td colspan="7" class="muted" style="text-align:center;padding:20px">Nenhum caixa cadastrado.</td></tr>';
@@ -3673,14 +3675,21 @@ function pdvTerminalForm(i){
       +'<div class="field"><label class="lbl">Nome</label><input class="in" id="pdvTN" value="'+esc(t?t.name:'')+'" placeholder="Caixa principal"></div>'
       +'<div class="field"><label class="lbl">Impressora térmica</label><input class="in" id="pdvTP" value="'+esc(t&&t.printer_name||'')+'" placeholder="Padrão do Windows"></div>'
       +'<div class="field"><label class="lbl">Largura da bobina</label><select class="in" id="pdvTPaper"><option value="80" '+(!t||+t.paper_mm!==58?'selected':'')+'>80 mm</option><option value="58" '+(t&&+t.paper_mm===58?'selected':'')+'>58 mm</option></select></div>'
-      +'<div class="field"><label class="lbl">Maquininha vinculada (Mercado Pago Point)</label><select class="in" id="pdvTLink"><option value="">(perguntar no caixa)</option>'+(PDV.machines||[]).map(function(m){return '<option value="'+m.id+'" '+(t&&t.payment_terminal_id===m.id?'selected':'')+'>'+esc(m.nome)+'</option>';}).join('')+'</select></div>'
+      +'<div class="field" style="grid-column:1/-1"><label class="lbl">Maquininhas vinculadas (Mercado Pago Point)</label>'
+        +'<div id="pdvTLinks" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">'
+        +((PDV.machines||[]).length
+            ? (PDV.machines||[]).map(function(m){ var on=(t&&Array.isArray(t.machine_ids)&&t.machine_ids.indexOf(m.id)>=0)||(t&&(!t.machine_ids||!t.machine_ids.length)&&t.payment_terminal_id===m.id); return '<label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" class="pdvTLinkChk" value="'+m.id+'"'+(on?' checked':'')+'> '+esc(m.nome)+'</label>'; }).join('')
+            : '<span class="muted" style="font-size:13px">Nenhuma maquininha cadastrada — cadastre em Config → Maquininhas.</span>')
+        +'</div>'
+        +'<p class="muted" style="font-size:12px;margin-top:4px">Marque as maquininhas deste caixa. Com mais de uma, o operador escolhe na hora de cobrar; com só uma, já vai direto; nenhuma marcada = pergunta entre todas.</p></div>'
     +'</div><label style="display:flex;gap:8px;align-items:center;margin-top:4px"><input type="checkbox" id="pdvTA" '+(!t||t.active?'checked':'')+'> Caixa ativo</label>'
     +'<p class="muted" style="font-size:12.5px;margin-top:10px">Informe exatamente o nome da fila do Windows. Se ficar vazio, o ONPDV usa a impressora padrão.</p></div>'
     +'<div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn" id="pdvTS" data-onclick="pdvSaveTerminal('+(t?"'"+t.id+"'":'null')+')">Salvar</button></div>');
 }
 async function pdvSaveTerminal(id){
   const b=document.getElementById('pdvTS');if(b){b.disabled=true;b.textContent='Salvando...';}
-  try{const {error}=await sb.rpc('pdv_save_terminal',{p_id:id,p_code:val('pdvTC'),p_name:val('pdvTN'),p_printer_name:val('pdvTP'),p_active:!!document.getElementById('pdvTA').checked,p_paper_mm:+val('pdvTPaper')||80,p_payment_terminal_id:(val('pdvTLink')||null)});if(error)throw error;
+  const machineIds=Array.from(document.querySelectorAll('.pdvTLinkChk')).filter(c=>c.checked).map(c=>c.value);
+  try{const {error}=await sb.rpc('pdv_save_terminal',{p_id:id,p_code:val('pdvTC'),p_name:val('pdvTN'),p_printer_name:val('pdvTP'),p_active:!!document.getElementById('pdvTA').checked,p_paper_mm:+val('pdvTPaper')||80,p_payment_terminal_id:(machineIds[0]||null),p_machine_ids:machineIds});if(error)throw error;
     closeModal();toast('Caixa salvo ✓');await renderPdvTerminalsConfig();
   }catch(e){console.error(e);toast(pdvErr(e));if(b){b.disabled=false;b.textContent='Salvar';}}
 }
