@@ -1,4 +1,4 @@
-ONPDV — PACOTE DE PUBLICAÇÃO DO SITE · versão 2026.09.07-v54
+ONPDV — PACOTE DE PUBLICAÇÃO DO SITE · versão 2026.09.08-v55
 ============================================================
 
 O QUE FAZER
@@ -6,7 +6,7 @@ O QUE FAZER
 Suba TODO o conteúdo desta pasta para a raiz do site (Vercel), mantendo as
 subpastas assets, downloads, icons, lib e partials. Arquivo inicial: index.html.
 
-Ao publicar, o version.json avisa os caixas já instalados que saiu a v54.
+Ao publicar, o version.json avisa os caixas já instalados que saiu a v55.
 
 O QUE JÁ ESTÁ NO AR (não faz parte deste pacote)
 ------------------------------------------------

@@ -355,18 +355,27 @@ window.tfaStartEnroll = async ()=>{
     if(error) throw error;
     const qr=(en.totp&&en.totp.qr_code)||''; const secret=(en.totp&&en.totp.secret)||'';
     window._tfaEnrollId=en.id;
+    const qrIsSvg=/^\s*<(\?xml|svg)/i.test(qr);
+    const qrInner = !qr
+      ? '<div class="muted" style="text-align:center;font-size:12.5px;padding:26px 6px;line-height:1.4">QR indisponível.<br>Use a chave manual ao lado.</div>'
+      : (qrIsSvg
+          ? '<div style="width:100%">'+qr+'</div>'
+          : '<img id="tfaQr" alt="QR Code para o app autenticador" style="display:block;width:100%;height:auto;image-rendering:pixelated">');
     body.innerHTML=''
-      +'<p class="muted" style="margin:0 0 10px">1) Escaneie o QR no seu app autenticador (ou digite a chave). 2) Informe o código de 6 dígitos que aparecer.</p>'
-      +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">'
-        +'<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px;max-width:200px">'+qr+'</div>'
-        +'<div style="flex:1 1 200px">'
-          +(secret?'<div class="lbl">Chave manual</div><div style="font-family:monospace;font-size:13px;word-break:break-all;background:#f5f7fb;border-radius:8px;padding:8px;margin-bottom:10px">'+esc(secret)+'</div>':'')
-          +'<div class="field"><label class="lbl" for="tfaCode">Código do app</label><input id="tfaCode" class="in" inputmode="numeric" maxlength="6" placeholder="000000" style="letter-spacing:.3em;text-align:center;font-size:18px"></div>'
-          +'<p id="tfaMsg" class="muted"></p>'
+      +'<p class="muted" style="margin:0 0 14px;font-size:13.5px">1) Escaneie o QR no seu app autenticador (ou digite a chave manual). 2) Informe o código de 6 dígitos que aparecer.</p>'
+      +'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start">'
+        +'<div style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;width:172px;flex:0 0 auto;box-sizing:border-box">'+qrInner+'</div>'
+        +'<div style="flex:1 1 220px;min-width:200px">'
+          +(secret?'<div style="font-size:12px;font-weight:800;color:var(--ink2);text-transform:uppercase;letter-spacing:.3px;margin:0 0 4px 2px">Chave manual</div>'
+            +'<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;letter-spacing:.5px;word-break:break-all;background:#f5f7fb;border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:14px">'+esc(secret)+'</div>':'')
+          +'<div class="field" style="margin-bottom:6px"><label class="lbl" for="tfaCode">Código do app</label>'
+            +'<input id="tfaCode" class="in" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="letter-spacing:.4em;text-align:center;font-size:20px;font-weight:700"></div>'
+          +'<p id="tfaMsg" class="muted" style="margin:6px 0 0;min-height:18px;font-size:13px"></p>'
         +'</div>'
       +'</div>'
-      +'<div class="m-foot" style="padding:0;margin-top:10px"><button class="btn ghost" data-onclick="tfaCancelEnroll()">Cancelar</button>'
+      +'<div class="m-foot" style="padding:14px 0 0;margin-top:14px"><button class="btn ghost" data-onclick="tfaCancelEnroll()">Cancelar</button>'
       +'<button class="btn" data-onclick="tfaConfirmEnroll()">Confirmar e ativar</button></div>';
+    if(qr&&!qrIsSvg){ const qi=$('#tfaQr'); if(qi) qi.src=qr; }
     setTimeout(()=>{ const i=$('#tfaCode'); if(i) i.focus(); }, 60);
   }catch(e){ body.innerHTML='<p class="muted">Não foi possível iniciar o 2FA: '+esc((e&&e.message)||'')+'</p><div class="m-foot" style="padding:0"><button class="btn ghost" data-modal-close>Fechar</button></div>'; }
 };

@@ -6,7 +6,7 @@ vanilla (sem framework/bundler) sobre um backend **Supabase** (PostgreSQL), com
 integrações de pagamento (**Mercado Pago** — Point + PIX), fiscal (**NFC-e**) e
 mensageria (**WhatsApp** / Web Push).
 
-> Versão atual: **2026.09.07-v54** (ver `version.json`).
+> Versão atual: **2026.09.08-v55** (ver `version.json`).
 
 ---
 
