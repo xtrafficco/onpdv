@@ -986,6 +986,7 @@ function onpdvShowUpdateNotice(latest){
 async function posFlow(saleId, numero, total, terminalId, tipo, parcelas,context){ window._posSettled=false; window._posKind=(context&&context.kind)||'venda';window._posContext=context||null;
   const tipoLbl = { credito:`Crédito ${parcelas>1?parcelas+'x':'à vista'}`, debito:'Débito', pix:'PIX', estorno:'Estorno / cancelamento' }[tipo];
   const _isVoid = tipo==='estorno';
+  const ids = Array.isArray(terminalId) ? terminalId.filter(Boolean) : (terminalId?[terminalId]:[]);
   modal(`
     <div class="m-head"><h3>${_isVoid?'Estorno':window._posKind==='entrega'?'Pagamento da entrega':'Maquininha'} · Venda #${numero}</h3><button data-onclick="closePos()">×</button></div>
     <div class="m-body qrbox" id="posBody">
@@ -1002,26 +1003,62 @@ async function posFlow(saleId, numero, total, terminalId, tipo, parcelas,context
     if(tipo==='pix') cfdPay({ status:'pix_wait', amount:total, machine:true });
     else cfdPay({ status:'card_wait', amount:total });
   }
-  try{
-    const { data:req, error } = await sb.rpc('erp_pos_request', { p_sale:saleId, p_terminal:terminalId, p_tipo:tipo, p_parcelas:parcelas });
-    if(error) throw error;
-    window._posReq = req.id; window._posSale = saleId;
-    $('#posStat').innerHTML = '<span class="chip amber">⏳ Aguardando a maquininha…</span>';
-    // A maquininha Mercado Pago Point é acionada pela edge function pos-cloud-charge,
-    // que envia a cobrança (débito/crédito/PIX) direto para o visor do aparelho.
-    $('#posStat').innerHTML = '<span class="chip amber">📲 Enviando a cobrança para a maquininha Mercado Pago Point…</span>';
-    sb.functions.invoke('pos-cloud-charge',{ body:{ request_id:req.id } })
-      .then(({data,error})=>{ if(error){ console.warn('pos-cloud-charge',error); if(!window._posSettled) posFailChoice('Não consegui acionar a maquininha. Verifique o aparelho e tente outra forma de pagamento.'); } })
-      .catch(e=>console.warn('pos-cloud-charge',e));
-    // Realtime: escuta a resolução da requisição
-    if(POS_CHAN){ sb.removeChannel(POS_CHAN); }
-    POS_CHAN = sb.channel('pos-'+req.id)
-      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'pos_payment_requests', filter:`id=eq.${req.id}` },
-        p=> onPosUpdate(p.new))
-      .subscribe();
-    // fallback: polling a cada 3s
-    posPoll(req.id);
-  }catch(e){ try{cfdPay({status:'clear'});}catch(_){} posFailChoice(e && (e.message||String(e)) || 'Falha ao acionar a maquininha'); }
+  if(!ids.length){ posFailChoice('Nenhuma maquininha vinculada a este caixa.'); return; }
+  await posQueueBegin({
+    ids, i:0, saleId, total, kind:window._posKind, tipo,
+    mk: async (tid)=>{ const { data:req, error } = await sb.rpc('erp_pos_request', { p_sale:saleId, p_terminal:tid, p_tipo:tipo, p_parcelas:parcelas }); if(error) throw error; window._posSale=saleId; return req.id; },
+  });
+}
+// ===== Motor de FILA de maquininhas (failover) =====
+// Tenta a 1ª da fila; se NÃO ATENDER (aparelho off / sem resposta em ~55s / expirado)
+// aborta com segurança e cai para a próxima. Cartão RECUSADO é terminal (não pula).
+let posAttemptTimer=null;
+function posArmAttemptTimer(){ clearTimeout(posAttemptTimer); posAttemptTimer=setTimeout(()=>{ if(!window._posSettled) posQueueAdvanceOrFail('A maquininha não respondeu a tempo.'); }, 75000); }
+function posClearAttemptTimer(){ clearTimeout(posAttemptTimer); posAttemptTimer=null; }
+function posBindRequest(reqId){
+  if(POS_CHAN){ sb.removeChannel(POS_CHAN); }
+  POS_CHAN = sb.channel('pos-'+reqId)
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'pos_payment_requests', filter:`id=eq.${reqId}` }, p=> onPosUpdate(p.new))
+    .subscribe();
+  posPoll(reqId);
+}
+async function posQueueBegin(q){ window._posQ=q; await posQueueAttempt(); }
+async function posQueueAttempt(){
+  const q=window._posQ; if(!q || window._posSettled) return;
+  const tid=q.ids[q.i];
+  const s=$('#posStat'); if(s) s.innerHTML='<span class="chip amber">📲 Enviando para a maquininha'+(q.ids.length>1?(' '+(q.i+1)+' de '+q.ids.length):'')+'…</span>';
+  let reqId;
+  try{ reqId = await q.mk(tid); }
+  catch(e){ // não conseguiu nem criar a requisição nesta máquina → tenta a próxima
+    if(q.i+1 < q.ids.length){ q.i++; return posQueueAttempt(); }
+    try{cfdPay({status:'clear'});}catch(_){}
+    return posFailChoice(pdvErr(e));
+  }
+  window._posReq = reqId;
+  posBindRequest(reqId);
+  posArmAttemptTimer();
+  sb.functions.invoke('pos-cloud-charge',{ body:{ request_id:reqId } })
+    .then(({data,error})=>{ if(window._posSettled) return;
+      if(error){ console.warn('pos-cloud-charge',error); posQueueAdvanceOrFail('Não consegui acionar a maquininha.'); return; }
+      if(data && data.status==='processando'){ posQueueAdvanceOrFail('A maquininha não respondeu.'); }
+    })
+    .catch(e=>{ console.warn('pos-cloud-charge',e); if(!window._posSettled) posQueueAdvanceOrFail('Não consegui acionar a maquininha.'); });
+}
+// Aborta a cobrança atual no aparelho SEM cancelar a venda (keep_sale) — finaliza
+// se já tiver sido paga. Devolve 'aprovado' | 'cancelado'.
+async function posAbortCurrent(){ const reqId=window._posReq; if(!reqId) return 'cancelado';
+  try{ const {data,error}=await sb.functions.invoke('pos-cloud-charge',{ body:{ request_id:reqId, action:'cancel', keep_sale:true } }); if(error) throw error; return (data&&data.status)||'cancelado'; }
+  catch(e){ console.warn('pos-abort',e); try{ await sb.rpc('erp_pos_cancel',{p_request:reqId}); }catch(_){} return 'cancelado'; } }
+async function posQueueAdvanceOrFail(msg){
+  if(window._posSettled) return;
+  const q=window._posQ; posClearAttemptTimer(); stopPos();
+  window._posLastSale = window._posSale || (q&&q.saleId) || null;
+  const st = await posAbortCurrent();               // aborta com segurança a tentativa atual
+  if(window._posSettled) return;
+  if(st==='aprovado'){ window._posSettled=true; posApprovedAfterCancel(); return; }
+  if(q && q.i+1 < q.ids.length){ const sx=$('#posStat'); if(sx) sx.innerHTML='<span class="chip amber">↪️ Tentando a próxima maquininha…</span>'; q.i++; return posQueueAttempt(); }
+  try{cfdPay({status:'clear'});}catch(_){}
+  posFailChoice(msg || 'Nenhuma maquininha atendeu.');
 }
 function onPosUpdate(r){ if(window._posSettled) return;
   const s=$('#posStat'); if(!s) return;
@@ -1030,7 +1067,7 @@ function onPosUpdate(r){ if(window._posSettled) return;
   else if(r.status==='negado'){ stopPos(); try{cfdPay({ status:'declined', msg:r.mensagem||'' });}catch(_){} posFailChoice(r.mensagem||'Pagamento negado'); }
   else if(r.status==='processando'){ s.innerHTML='<span class="chip amber">💳 Processando na maquininha…</span>';
     cfdPay({ status:'card_wait', amount:CFD_PAYAMT, sub:'Processando o cartão…' }); }
-  else if(r.status==='expirado'){ stopPos(); posFailChoice('A maquininha não respondeu a tempo.'); }
+  else if(r.status==='expirado'){ posQueueAdvanceOrFail('A maquininha não respondeu a tempo.'); }
 }
 let posTimer=null;
 function posPoll(id){ clearInterval(posTimer);
@@ -1039,7 +1076,7 @@ function posPoll(id){ clearInterval(posTimer);
     if(data) onPosUpdate(data);
   }, 3000);
 }
-function stopPos(){ clearInterval(posTimer); if(POS_CHAN){ sb.removeChannel(POS_CHAN); POS_CHAN=null; } }
+function stopPos(){ clearInterval(posTimer); posClearAttemptTimer(); if(POS_CHAN){ sb.removeChannel(POS_CHAN); POS_CHAN=null; } }
 window.closePos = ()=>{ stopPos(); if(CFD_LASTPAY) cfdPay({status:'clear'}); closeModal(); };
 window.cancelPos = async ()=>{ if(window._posReq){ try{ await sb.rpc('erp_pos_cancel',{ p_request:window._posReq }); }catch(_){} } posFailChoice('Cobrança cancelada.'); };
 function posRestoreCart(){ const s=window._posSnap; if(!s)return; PDV.items=JSON.parse(JSON.stringify(s.items||[])); PDV.cust=s.cust||null; PDV.disc=s.disc||0; PDV.sur=s.sur||0; PDV.cb=s.cb||0; PDV.sel=PDV.items.length-1; renderCaixa(); }
@@ -1119,8 +1156,14 @@ async function pdvMaquininha(tipo, termId){
   if(!navigator.onLine||PDV.ses.offline){toast('A maquininha exige internet. Use dinheiro ou outra forma para vender offline.', true);return;}
   const terms=(TERMINALS||[]);
   if(!terms.length){toast('Cadastre uma maquininha em Config → Maquininhas');return;}
-  let term = termId ? terms.find(t=>t.id===termId) : null;
-  if(!term){ const linked=pdvMachinesFor(terms); if(linked.length===1) term=linked[0]; else { pdvPickTerminal(tipo); return; } }
+  let queue;
+  if(termId){ queue=[termId]; }
+  else{
+    const linkedIds=pdvLinkedMachineIds();
+    if(linkedIds.length){ queue=linkedIds.filter(id=>terms.some(t=>t.id===id)); if(!queue.length){ toast('As maquininhas deste caixa estão inativas'); return; } }
+    else if(terms.length===1){ queue=[terms[0].id]; }
+    else { pdvPickTerminal(tipo); return; }
+  }
   if(PDV.busy)return; PDV.busy=true;
   const t=pdvTotals();
   const items=PDV.items.map(i=>({product_id:i.id,descricao:i.name,qtd:i.qty,preco_unit:i.price,custo_unit:0}));
@@ -1131,7 +1174,7 @@ async function pdvMaquininha(tipo, termId){
     if(error)throw error;
     window._posSnap=pdvSnapshot();pdvResetDraft();pdvCloseModal();renderCaixa();
     try{await loadProducts();buildPdvCatalog();refreshCash();}catch(_e){}
-    await posFlow(data.sale_id,data.numero,data.total,term.id,tipo,1);
+    await posFlow(data.sale_id,data.numero,data.total,queue,tipo,1);
   }catch(e){console.error(e);toast(pdvErr(e));}
   finally{PDV.busy=false;}
 }
@@ -2430,8 +2473,14 @@ function pdvPickDeliveryTerminal(tipo){
 async function pdvDeliveryMachine(tipo,termId){
   if(PDV.busy)return;if(PDV.delivPixUnavailable){toast('Atualize o banco do ONPDV antes de transmitir a entrega para a maquininha');return;}
   const terms=TERMINALS||[];if(!terms.length){toast('Cadastre uma maquininha em Config → Maquininhas');return;}
-  let term=termId?terms.find(t=>t.id===termId):null;
-  if(!term){ const linked=pdvMachinesFor(terms); if(linked.length===1) term=linked[0]; else { pdvPickDeliveryTerminal(tipo); return; } }
+  let queue;
+  if(termId){ queue=[termId]; }
+  else{
+    const linkedIds=pdvLinkedMachineIds();
+    if(linkedIds.length){ queue=linkedIds.filter(id=>terms.some(t=>t.id===id)); if(!queue.length){ toast('As maquininhas deste caixa estão inativas'); return; } }
+    else if(terms.length===1){ queue=[terms[0].id]; }
+    else { pdvPickDeliveryTerminal(tipo); return; }
+  }
   let d;try{d=pdvDeliveryPayload();}catch(e){toast(e.message||String(e));return;}
   PDV.busy=true;
   try{
@@ -2440,7 +2489,7 @@ async function pdvDeliveryMachine(tipo,termId){
     window._posSnap=pdvSnapshot();window._posDelivery={deliveryId:data.delivery_id,numero:data.numero,total:data.total};
     pdvResetDraft();pdvCloseModal();renderCaixa();
     try{await loadProducts();buildPdvCatalog();}catch(_){}
-    await posFlow(data.sale_id,data.numero,data.total,term.id,tipo,1,{kind:'entrega',deliveryId:data.delivery_id});
+    await posFlow(data.sale_id,data.numero,data.total,queue,tipo,1,{kind:'entrega',deliveryId:data.delivery_id});
   }catch(e){console.error(e);toast(pdvErr(e));}
   finally{PDV.busy=false;}
 }
@@ -2867,21 +2916,22 @@ window.pdvCredPay = async (tipo)=>{
   }
   const terms=(TERMINALS||[]);
   if(!terms.length){ toast('Cadastre uma maquininha em Config → Maquininhas'); return; }
-  const linked=pdvMachinesFor(terms);
-  let term=(linked.length===1?linked[0]:null);
-  if(!term){ pdvModal('Escolha a maquininha 💳', linked.map(t=>'<button class="pdv-btn" style="width:100%;margin:5px 0;text-align:left" data-onclick="pdvCloseModal();pdvCredMaquininha(\''+tipo+'\',\''+t.id+'\')">💳 '+esc(t.nome)+'</button>').join('')+'<button class="pdv-btn ghost" style="width:100%;margin-top:6px" data-pdv-close>Cancelar</button>', true); return; }
-  pdvCredMaquininha(tipo, term.id);
+  let queue;
+  const linkedIds=pdvLinkedMachineIds();
+  if(linkedIds.length){ queue=linkedIds.filter(id=>terms.some(t=>t.id===id)); if(!queue.length){ toast('As maquininhas deste caixa estão inativas'); return; } }
+  else if(terms.length===1){ queue=[terms[0].id]; }
+  else { pdvModal('Escolha a maquininha 💳', pdvMachinesFor(terms).map(t=>'<button class="pdv-btn" style="width:100%;margin:5px 0;text-align:left" data-onclick="pdvCloseModal();pdvCredMaquininha(\''+tipo+'\',\''+t.id+'\')">💳 '+esc(t.nome)+'</button>').join('')+'<button class="pdv-btn ghost" style="width:100%;margin-top:6px" data-pdv-close>Cancelar</button>', true); return; }
+  pdvCredStartQueue(tipo, queue);
 };
-async function pdvCredMaquininha(tipo, termId){
+async function pdvCredMaquininha(tipo, termId){ return pdvCredStartQueue(tipo, [termId]); }
+async function pdvCredStartQueue(tipo, ids){
   const ctx=PDV_CRED.pending; if(!ctx){ toast('Refaça a seleção do crediário'); return; }
-  if(PDV.busy) return; PDV.busy=true;
-  try{
-    const { data:r, error } = await sb.rpc('erp_receivables_pos_request',{ p_ids:ctx.ids, p_terminal:termId, p_tipo:tipo, p_valor:ctx.pago, p_venc_saldo:ctx.vsaldo, p_store:CURRENT_STORE });
-    if(error) throw error;
-    PDV.busy=false;
-    window._posCred={ recebido:ctx.pago, parcelas_pagas:ctx.ids.length, saldo:round2(ctx.tot-ctx.pago) };
-    posFlowRequest(r.id, (+r.valor||ctx.pago), termId, tipo, 'crediario');
-  }catch(e){ PDV.busy=false; console.error(e); toast(pdvErr(e)); }
+  ids=(ids||[]).filter(Boolean); if(!ids.length){ toast('Nenhuma maquininha vinculada a este caixa'); return; }
+  window._posCred={ recebido:ctx.pago, parcelas_pagas:ctx.ids.length, saldo:round2(ctx.tot-ctx.pago) };
+  posFlowRequestQueue({
+    ids, total:ctx.pago, tipo, kind:'crediario',
+    mk: async (tid)=>{ const { data:r, error } = await sb.rpc('erp_receivables_pos_request',{ p_ids:ctx.ids, p_terminal:tid, p_tipo:tipo, p_valor:ctx.pago, p_venc_saldo:ctx.vsaldo, p_store:CURRENT_STORE }); if(error) throw error; return r.id; },
+  });
 }
 // Envia o PIX do crediário para o WhatsApp do cliente. A cobrança fica em espera
 // na fila de crediário do caixa; quando o cliente paga, o cartão pisca e o
@@ -2944,10 +2994,13 @@ function pdvCredPixWhats(phone){
 }
 window.pdvCopyCredPix=pdvCopyCredPix;
 window.pdvCredPixWhats=pdvCredPixWhats;
-async function posFlowRequest(reqId, total, terminalId, tipo, kind){
-  window._posSettled=false; window._posKind=kind||'venda'; window._posSnap=null;
+// Cobrança em maquininha a partir de uma requisição já modelada (crediário/estorno),
+// agora em FILA: q = { ids:[terminalId...], total, tipo, kind, mk(terminalId)->reqId }.
+async function posFlowRequestQueue(q){
+  window._posSettled=false; window._posKind=q.kind||'venda'; window._posSnap=null; window._posSale=null;
+  const tipo=q.tipo, total=q.total;
   const tipoLbl={credito:'Crédito',debito:'Débito',pix:'PIX'}[tipo]||tipo;
-  modal('<div class="m-head"><h3>Maquininha · '+(kind==='crediario'?'Crediário':'Cobrança')+'</h3><button data-onclick="closePos()">&times;</button></div>'
+  modal('<div class="m-head"><h3>Maquininha · '+(q.kind==='crediario'?'Crediário':'Cobrança')+'</h3><button data-onclick="closePos()">&times;</button></div>'
     +'<div class="m-body qrbox" id="posBody"><div style="font-size:44px">💳</div>'
     +'<p style="font-family:\'Fredoka\';font-size:28px;font-weight:700;margin:4px 0">'+BRL(total)+'</p>'
     +'<p class="muted">'+tipoLbl+'</p>'
@@ -2956,13 +3009,7 @@ async function posFlowRequest(reqId, total, terminalId, tipo, kind){
     +'<div class="m-foot"><button class="btn ghost" data-onclick="cancelPos()">Cancelar cobrança</button></div>');
   CFD_PAYAMT=total;
   if(tipo==='pix') cfdPay({ status:'pix_wait', amount:total, machine:true }); else cfdPay({ status:'card_wait', amount:total });
-  window._posReq=reqId; window._posSale=null;
-  sb.functions.invoke('pos-cloud-charge',{ body:{ request_id:reqId } })
-    .then(({data,error})=>{ if(error){ console.warn('pos-cloud-charge',error); if(!window._posSettled) posFailChoice('Não consegui acionar a maquininha. Verifique o aparelho e tente outra forma de pagamento.'); } })
-    .catch(e=>console.warn('pos-cloud-charge',e));
-  if(POS_CHAN){ sb.removeChannel(POS_CHAN); }
-  POS_CHAN = sb.channel('pos-'+reqId).on('postgres_changes', { event:'UPDATE', schema:'public', table:'pos_payment_requests', filter:'id=eq.'+reqId }, p=> onPosUpdate(p.new)).subscribe();
-  posPoll(reqId);
+  await posQueueBegin({ ids:q.ids.slice(), i:0, saleId:null, total, kind:q.kind, tipo, mk:q.mk });
 }
 function posCredApproved(){
   const c=window._posCred||{};
