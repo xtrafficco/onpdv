@@ -739,8 +739,8 @@ body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filte
 .pdv-cred-pix{background:#eafaf1;border-bottom-color:#67c99a}
 
 /* Passo do 2FA no login: esconde e-mail/senha e mostra só o desafio do autenticador. */
-#login .box.mfa-step .field,
-#login .box.mfa-step #btnLogin,
-#login .box.mfa-step .login-help,
-#login .box.mfa-step .login-links,
-#login .box.mfa-step #liMsg{display:none}
+#login .box.mfa-step > .field,
+#login .box.mfa-step > #btnLogin,
+#login .box.mfa-step > .login-help,
+#login .box.mfa-step > .login-links,
+#login .box.mfa-step > #liMsg{display:none}
