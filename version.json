@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.08-v55",
+  "version": "2026.09.09-v56",
   "installer": "/downloads/onpdv-caixa.bat",
-  "notes": "Correções de interface: o modal de Verificação em duas etapas (2FA) volta a exibir o QR Code corretamente e alinha a chave manual e o campo do código no padrão do sistema; ajuste do espaçamento entre os blocos de Cobrança automática por PIX e Maquininhas em Configurações."
+  "notes": "Novo layout de impressão dos recibos de pagamento (padrão PedidoOK): cabeçalho, tabela de itens com código, FORMA DE PAGAMENTO e PARCELAS. Canhoto com assinatura do cliente sai apenas quando a venda é no crediário. O mesmo layout foi aplicado ao Fechamento de caixa e à Leitura X. Correção de caracteres especiais: todo texto enviado à impressora é normalizado para ASCII, então acentos e símbolos saem sempre corretos."
 }

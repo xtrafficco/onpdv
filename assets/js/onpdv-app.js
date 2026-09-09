@@ -1099,7 +1099,7 @@ async function posShowReceipt(saleId, card){
     const {data,error}=await sb.rpc('pdv_sale_reprint',{p_order:saleId});
     if(error||!data||!data.res) throw (error||new Error('sem dados'));
     const sale={ when:new Date(data.when||Date.now()),
-      items:(data.items||[]).map(i=>({name:i.name||'Item',price:+i.price||0,qty:+i.qty||1,disc:+i.disc||0,kg:!!i.kg})),
+      items:(data.items||[]).map(i=>({name:i.name||'Item',price:+i.price||0,qty:+i.qty||1,disc:+i.disc||0,kg:!!i.kg,ean:i.ean||i.codigo||i.sku||i.code||''})),
       pays:(data.pays||[]).map(pp=>({m:pp.m||'outro',v:+pp.v||0,venc:pp.venc||null,parcelas:pp.parcelas||1})),
       res:data.res, customerId:data.customer_id||data.res.customer_id||null };
     if(sale.res) sale.res.reprint=false;
@@ -3375,44 +3375,14 @@ function pdvPortalQrImage(){
     || ('https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=4&data='+encodeURIComponent(ONPDV_CUSTOMER_PORTAL_URL));
 }
 function pdvReceiptHtml(sale){
-  const r=sale.res,d=sale.when||new Date(),p=n=>String(n).padStart(2,'0');
-  const when=p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
-  const payLbl={dinheiro:'Dinheiro',pix:'PIX',debito:'Cartão débito',credito:'Cartão crédito',crediario:'Crediário',outro:'Outro'};
+  var plain=pdvAscii(pdvReceiptPlain(sale));
+  var isCred=(sale.pays||[]).some(function(x){return x.m==='crediario';});
+  var qr=(pdvSaleIsAnonymous(sale)&&!isCred&&!(sale.res&&sale.res.cashback_earned>0))
+    ? '<img src="'+pdvPortalQrImage()+'" alt="Portal do Cliente" width="150" height="150" style="display:block;margin:8px auto;max-width:90%;height:auto">'
+    : '';
   return '<div id="pdvPrint" class="rc">'
-    +'<div class="rc-h"><b>'+esc(DB.settings.storeName||'PetApp')+'</b><br>'
-      +esc(DB.settings.city||'')+'<br>'
-      +'<span class="rc-s">DOCUMENTO NÃO FISCAL · Venda #'+r.num+'</span><br>'
-      +(r.offline?'<b class="rc-s">COMPROVANTE PROVISÓRIO · AGUARDANDO SINCRONIZAÇÃO</b><br>':'')
-      +(r.reprint?'<b class="rc-s">★ SEGUNDA VIA ★</b><br>':'')+when+'</div>'
-    +'<div class="rc-l"></div>'
-    +'<table class="rc-t">'+sale.items.map(i=>
-        '<tr><td colspan="3">'+esc(i.name)+'</td></tr>'
-       +'<tr><td>'+(i.kg?pdvQ(i.qty,3)+' kg':pdvQ(i.qty,0)+' un')+' × '+BRL(i.price)+'</td>'
-       +'<td class="r">'+(i.disc>0?'− '+BRL(i.disc):'')+'</td>'
-       +'<td class="r"><b>'+BRL(round2(i.price*i.qty-(i.disc||0)))+'</b></td></tr>').join('')
-    +'</table><div class="rc-l"></div>'
-    +'<table class="rc-t">'
-      +'<tr><td>Subtotal</td><td class="r">'+BRL(r.subtotal)+'</td></tr>'
-      +(r.discount>0?'<tr><td>Descontos</td><td class="r">− '+BRL(r.discount)+'</td></tr>':'')
-      +(r.member_disc>0?'<tr><td>Assinante</td><td class="r">− '+BRL(r.member_disc)+'</td></tr>':'')
-      +(r.cashback_used>0?'<tr><td>Cashback usado</td><td class="r">− '+BRL(r.cashback_used)+'</td></tr>':'')
-      +(r.surcharge>0?'<tr><td>Acréscimo</td><td class="r">+ '+BRL(r.surcharge)+'</td></tr>':'')
-      +'<tr class="rc-tot"><td>TOTAL</td><td class="r">'+BRL(r.total)+'</td></tr>'
-      +sale.pays.map(x=>'<tr><td>'+(payLbl[x.m]||x.m)+(x.parcelas>1?' '+x.parcelas+'x':'')+'</td><td class="r">'+BRL(x.v)+'</td></tr>'+((x.bandeira||x.nsu||x.auth)?'<tr><td colspan="2" class="rc-s">'+[x.bandeira?('Bandeira '+esc(String(x.bandeira))):'',x.nsu?('NSU '+esc(String(x.nsu))):'',x.auth?('Aut '+esc(String(x.auth))):''].filter(Boolean).join(' u{00B7} ')+'</td></tr>':'')).join('')
-      +(r.change>0?'<tr><td>Troco</td><td class="r">'+BRL(r.change)+'</td></tr>':'')
-    +'</table>'
-    +(()=>{const cr=sale.pays.find(x=>x.m==='crediario');return cr?
-        '<div class="rc-l"></div><div class="rc-cb" style="font-weight:700">🧾 CREDIÁRIO — A RECEBER<br>'
-        +BRL(cr.v)+(cr.venc?' · vencimento '+fmtDate(cr.venc):'')+'</div>':'';})()
-    +(r.cashback_earned>0
-      ?'<div class="rc-l"></div><div class="rc-cb">🎁 '+esc(r.customer||'')+' ganhou '+BRL(r.cashback_earned)
-        +' de cashback<br>Saldo agora: <b>'+BRL(r.cashback_balance)+'</b></div>'
-      :pdvSaleIsAnonymous(sale)
-        ?'<div class="rc-l"></div><div class="rc-cb"><b>ACESSE O PORTAL DO CLIENTE</b><br>'
-          +'<img src="'+pdvPortalQrImage()+'" alt="QR do Portal do Cliente" width="150" height="150" style="display:block;margin:6px auto;max-width:90%;height:auto">'
-          +'Consulte compras, cashback e seus pets.</div>'
-        :'')
-    +'<div class="rc-f">Obrigado pela preferência!</div></div>';
+    +'<pre class="rc-pre" style="font-family:\'Consolas\',\'Courier New\',monospace;white-space:pre-wrap;word-break:break-word;margin:0">'
+    +esc(plain)+'</pre>'+qr+'</div>';
 }
 function pdvReceiptModal(sale){
   const r=sale.res;
@@ -3471,7 +3441,11 @@ function pdvCenterThermalBlock(text){
   return out.join('\n');
 }
 async function onpdvPrintText(text,label,options={}){
-  const clean=String(text||'').replace(/\u00a0/g,' ').trim();
+  // Transliteracao ASCII no ponto unico de saida: qualquer texto que va para a
+  // impressora termica sai limpo, igual ao cupom de referencia (RACOES, Emissao),
+  // sem depender da tabela de caracteres da impressora. Resolve de vez os
+  // "caracteres especiais que nao aparecem".
+  const clean=pdvAscii(String(text||'')).replace(/[ \t]+$/gm,'').trim();
   if(!clean){toast('Documento de impressão vazio.',true);return false;}
   if(!onpdvLocalPrint()){
     const html=options.html||('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>'+esc(label||'ONPDV')
@@ -3543,49 +3517,163 @@ function pdvTextPair(left,right,width){
   const room=Math.max(1,width-right.length-1);
   return left.slice(0,room).padEnd(room,' ')+' '+right.slice(0,width-room-1);
 }
-function pdvReceiptText(sale){
-  const r=sale.res,d=sale.when||new Date(),width=pdvPaper()==='58'?32:42;
-  const payLbl={dinheiro:'Dinheiro',pix:'PIX',debito:'Cartão débito',credito:'Cartão crédito',crediario:'Crediário',outro:'Outro'};
-  const L=[pdvTextCenter(DB.settings.storeName||'PetApp',width),pdvTextCenter(DB.settings.city||'',width),
-    pdvTextCenter('DOCUMENTO NÃO FISCAL',width),pdvTextCenter('Venda #'+r.num,width),
-    pdvTextCenter(new Date(d).toLocaleString('pt-BR'),width),'-'.repeat(width)];
-  if(r.offline)L.push(pdvTextCenter('COMPROVANTE PROVISÓRIO',width));
-  if(r.reprint)L.push(pdvTextCenter('SEGUNDA VIA',width));
-  sale.items.forEach(i=>{
-    L.push(String(i.name||'Produto').slice(0,width));
-    const qty=i.kg?pdvQ(i.qty,3)+' kg':pdvQ(i.qty,0)+' un';
-    L.push(pdvTextPair(qty+' x '+pdvPlainMoney(i.price),pdvPlainMoney(round2(i.price*i.qty-(i.disc||0))),width));
-    if(i.disc>0)L.push(pdvTextPair('  desconto','- '+pdvPlainMoney(i.disc),width));
+/* ---------- utilitarios de impressao (layout PedidoOK) ---------- */
+// Transliteracao para ASCII imprimivel: acentos viram letra-base (a-acento->a,
+// c-cedilha->c, a-til->a, o-til->o), sinais especiais viram equivalentes simples e
+// emoji sao removidos. E o que garante o cupom "sem caracteres estranhos".
+function pdvAscii(str){
+  var s=String(str==null?'':str);
+  try{ s=s.normalize('NFD').replace(/[\u0300-\u036f]/g,''); }catch(e){}
+  var map={'\u00b7':'-','\u2022':'-','\u2212':'-','\u2013':'-','\u2014':'-','\u2015':'-',
+    '\u2018':"'",'\u2019':"'",'\u201a':"'",'\u201c':'"','\u201d':'"','\u2026':'...',
+    '\u00a0':' ','\u2192':'->','\u2190':'<-','\u00aa':'a','\u00ba':'o',
+    '\u2713':'v','\u2714':'v','\u2717':'x','\u2718':'x','\u2605':'*','\u2606':'*',
+    '\u20ac':'EUR','\u00a3':'GBP'};
+  s=s.replace(/[^\x00-\x7f]/g,function(c){ return Object.prototype.hasOwnProperty.call(map,c)?map[c]:''; });
+  return s;
+}
+// dinheiro so com o numero (1.234,56) - o "R$" fica no rotulo, como na referencia
+function pdvMoneyNum(v){ return (Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+// quebra um texto em linhas de no maximo `width` colunas, sem cortar palavra no meio
+function pdvWrapText(text,width){
+  var words=String(text==null?'':text).split(/\s+/).filter(Boolean),lines=[],cur='';
+  words.forEach(function(w){
+    while(w.length>width){ if(cur){lines.push(cur);cur='';} lines.push(w.slice(0,width)); w=w.slice(width); }
+    if(!cur){ cur=w; } else if((cur+' '+w).length<=width){ cur+=' '+w; } else { lines.push(cur); cur=w; }
   });
-  L.push('-'.repeat(width),pdvTextPair('Subtotal',pdvPlainMoney(r.subtotal),width));
-  if(r.discount>0)L.push(pdvTextPair('Descontos','- '+pdvPlainMoney(r.discount),width));
-  if(r.member_disc>0)L.push(pdvTextPair('Assinante','- '+pdvPlainMoney(r.member_disc),width));
-  if(r.cashback_used>0)L.push(pdvTextPair('Cashback usado','- '+pdvPlainMoney(r.cashback_used),width));
-  if(r.surcharge>0)L.push(pdvTextPair('Acréscimo','+ '+pdvPlainMoney(r.surcharge),width));
-  L.push('='.repeat(width),pdvTextPair('TOTAL',pdvPlainMoney(r.total),width));
-  (sale.pays||[]).forEach(x=>{L.push(pdvTextPair((payLbl[x.m]||x.m)+(x.parcelas>1?' '+x.parcelas+'x':''),pdvPlainMoney(x.v),width));const det=[x.bandeira?('Bandeira '+x.bandeira):'',x.nsu?('NSU '+x.nsu):'',x.auth?('Aut '+x.auth):''].filter(Boolean).join(' ');if(det)L.push(('  '+det).slice(0,width));});
-  if(r.change>0)L.push(pdvTextPair('Troco',pdvPlainMoney(r.change),width));
-  if(r.cashback_earned>0)L.push('-'.repeat(width),pdvTextCenter('Cashback ganho '+pdvPlainMoney(r.cashback_earned),width),
-    pdvTextCenter('Saldo '+pdvPlainMoney(r.cashback_balance),width));
-  if(pdvSaleIsAnonymous(sale))L.push('-'.repeat(width),pdvTextCenter('ACESSE O PORTAL DO CLIENTE',width),
-    pdvTextCenter('Compras, cashback e seus pets',width));
-  L.push('-'.repeat(width),pdvTextCenter('Obrigado pela preferência!',width));
+  if(cur)lines.push(cur);
+  return lines.length?lines:[''];
+}
+function pdvDateShort(d){ var x=(d instanceof Date)?d:new Date(d); if(isNaN(x))return ''; var p=function(n){return String(n).padStart(2,'0');}; return p(x.getDate())+'/'+p(x.getMonth()+1)+'/'+String(x.getFullYear()).slice(-2); }
+function pdvDateTimeShort(d){ var x=(d instanceof Date)?d:new Date(d); if(isNaN(x))return ''; var p=function(n){return String(n).padStart(2,'0');}; return pdvDateShort(x)+' '+p(x.getHours())+':'+p(x.getMinutes()); }
+function pdvVencDate(v){ if(!v)return null; var s=String(v),d=s.length>10?new Date(s):new Date(s+'T00:00:00'); return isNaN(d)?null:d; }
+function pdvAddMonths(d,m){ var x=new Date(d.getTime()); x.setMonth(x.getMonth()+m); return x; }
+function pdvPayMethodLabel(m){ return ({dinheiro:'DINHEIRO',pix:'PIX',debito:'CARTAO DEBITO',credito:'CARTAO CREDITO',crediario:'CREDIARIO',outro:'OUTRO'})[m]||String(m||'').toUpperCase(); }
+// Linha "cliente" do cabecalho: <prefixo do pedido>-<nome> ou "Consumidor Final"
+function pdvReceiptCustomer(sale){
+  var r=sale.res||{}, name=String(r.customer||r.cliente||'').trim();
+  if(pdvSaleIsAnonymous(sale)||!name) name='Consumidor Final';
+  var pre=String(r.order_id||r.id||r.sale_id||'').replace(/[^a-z0-9]/gi,'').slice(0,10);
+  return pre?pre+'-'+name:name;
+}
+// Parcelas: crediario vira N linhas (a receber); a vista/pix/cartao vira 1 linha (pago)
+function pdvReceiptParcelas(sale){
+  var r=sale.res||{}, d=sale.when||new Date(), out=[], paid=pdvDateShort(d);
+  (sale.pays||[]).forEach(function(x){
+    if(x.m==='crediario'){
+      var n=Math.max(1,parseInt(x.parcelas,10)||1), tot=Number(x.v)||0, per=round2(tot/n), acc=0;
+      var base=pdvVencDate(x.venc)||d;
+      for(var k=0;k<n;k++){ var val=(k===n-1)?round2(tot-acc):per; acc=round2(acc+val);
+        out.push({n:out.length+1,date:pdvDateShort(pdvAddMonths(base,k)),value:val,status:'a receber'}); }
+    } else {
+      out.push({n:out.length+1,date:paid,value:Number(x.v)||0,status:'pago'});
+    }
+  });
+  if(!out.length) out.push({n:1,date:paid,value:Number(r.total)||0,status:'pago'});
+  return out;
+}
+// Corpo do cupom em texto de coluna fixa (layout PedidoOK). Serve tanto para a
+// impressao termica quanto para a pre-visualizacao em <pre> (preview == impressao).
+function pdvReceiptPlain(sale){
+  var r=sale.res||{}, d=sale.when||new Date(), width=pdvPaper()==='58'?32:42, sep='-'.repeat(width);
+  var store=DB.settings.storeName||'PetApp', num=String(r.num||''), cliente=pdvReceiptCustomer(sale);
+  var L=[];
+  L.push(pdvTextCenter(store,width));
+  if(DB.settings.city) L.push(pdvTextCenter(String(DB.settings.city),width));
+  L.push(pdvTextCenter('Impresso em '+pdvDateTimeShort(d),width));
+  L.push(pdvTextCenter('SEM VALOR FISCAL',width));
+  if(r.offline) L.push(pdvTextCenter('COMPROVANTE PROVISORIO',width));
+  if(r.reprint) L.push(pdvTextCenter('SEGUNDA VIA',width));
+  L.push(sep);
+  L.push(pdvTextPair('Pedido','Numero: '+num,width));
+  L.push('Emissao: '+pdvDateShort(d));
+  L.push(cliente.slice(0,width));
+  L.push(sep);
+  L.push('#   CODIGO DESCRICAO');
+  L.push(pdvTextPair('    QTD UN VL UN R$','VL ITEM R$',width));
+  (sale.items||[]).forEach(function(i,idx){
+    var code=String(i.ean||i.code||i.sku||i.codigo||i.id||'').replace(/\s+/g,'').slice(0,8);
+    var head=String(idx+1).padStart(3,'0')+' '+(code?code+' ':'')+String(i.name||'Produto');
+    pdvWrapText(head,width).forEach(function(ln){ L.push(ln); });
+    var un=i.kg?'KG':'UN', qtd=i.kg?pdvQ(i.qty,3):pdvMoneyNum(i.qty);
+    var left='    '+qtd+' '+un+' X '+pdvMoneyNum(i.price);
+    L.push(pdvTextPair(left,pdvMoneyNum(round2(i.price*i.qty-(i.disc||0))),width));
+    if(i.disc>0) L.push(pdvTextPair('    desconto','- '+pdvMoneyNum(i.disc),width));
+  });
+  L.push(sep);
+  L.push(pdvTextPair('Subtotal R$',pdvMoneyNum(r.subtotal),width));
+  if(r.discount>0) L.push(pdvTextPair('Descontos R$','- '+pdvMoneyNum(r.discount),width));
+  if(r.member_disc>0) L.push(pdvTextPair('Assinante R$','- '+pdvMoneyNum(r.member_disc),width));
+  if(r.cashback_used>0) L.push(pdvTextPair('Cashback R$','- '+pdvMoneyNum(r.cashback_used),width));
+  if(r.surcharge>0) L.push(pdvTextPair('Acrescimo R$','+ '+pdvMoneyNum(r.surcharge),width));
+  L.push(pdvTextPair('Frete/Entrega R$','+'+pdvMoneyNum(r.frete||r.freight||r.delivery||r.entrega||0),width));
+  L.push(pdvTextPair('TOTAL R$',pdvMoneyNum(r.total),width));
+  if(r.change>0) L.push(pdvTextPair('Troco R$',pdvMoneyNum(r.change),width));
+  L.push(sep);
+  var formas=Array.from(new Set((sale.pays||[]).map(function(x){return pdvPayMethodLabel(x.m);}))).join(' + ')||'-';
+  pdvWrapText('FORMA DE PAGAMENTO: '+formas,width).forEach(function(ln){ L.push(ln); });
+  (sale.pays||[]).forEach(function(x){
+    var det=[x.bandeira?('Bandeira '+x.bandeira):'',x.nsu?('NSU '+x.nsu):'',x.auth?('Aut '+x.auth):''].filter(Boolean).join(' ');
+    if(det) L.push(('  '+det).slice(0,width));
+  });
+  L.push(sep);
+  L.push('PARCELAS');
+  L.push(sep);
+  pdvReceiptParcelas(sale).forEach(function(p){
+    L.push(pdvTextPair(String(p.n).padStart(2,'0')+'  '+p.date+'  '+pdvMoneyNum(p.value),p.status,width));
+  });
+  if(r.cashback_earned>0){ L.push(sep);
+    L.push(pdvTextCenter('Cashback ganho '+pdvMoneyNum(r.cashback_earned),width));
+    L.push(pdvTextCenter('Saldo '+pdvMoneyNum(r.cashback_balance),width)); }
+  else if(pdvSaleIsAnonymous(sale)){ L.push(sep);
+    L.push(pdvTextCenter('ACESSE O PORTAL DO CLIENTE',width));
+    L.push(pdvTextCenter('Compras, cashback e seus pets',width)); }
+  L.push('');
+  L.push(pdvTextCenter('Obrigado pela preferencia!',width));
+  // Canhoto: so quando ha crediario (o cliente assina reconhecendo as parcelas)
+  if((sale.pays||[]).some(function(x){return x.m==='crediario';})){
+    L.push('');
+    L.push(pdvTextCenter(('- '.repeat(Math.ceil(width/2))).trim(),width));
+    L.push('');
+    L.push(pdvTextCenter(store,width));
+    L.push(pdvTextPair('Pedido','Numero: '+num,width));
+    L.push('Emissao: '+pdvDateShort(d));
+    L.push(cliente.slice(0,width));
+    pdvWrapText('FORMA DE PAGAMENTO: '+formas,width).forEach(function(ln){ L.push(ln); });
+    L.push(pdvTextPair('TOTAL R$',pdvMoneyNum(r.total),width));
+    L.push(sep);
+    L.push('PARCELAS');
+    L.push(sep);
+    pdvReceiptParcelas(sale).forEach(function(p){
+      L.push(pdvTextPair(String(p.n).padStart(2,'0')+'  '+p.date+'  '+pdvMoneyNum(p.value),p.status,width));
+    });
+    L.push('');
+    L.push('');
+    L.push(pdvTextCenter('___________________________',width));
+    L.push(pdvTextCenter('assinatura do cliente',width));
+    L.push(pdvTextCenter('Impresso em '+pdvDateTimeShort(d),width));
+  }
   return L.join('\n');
+}
+function pdvReceiptText(sale){
+  return pdvReceiptPlain(sale);
 }
 async function pdvPrintReceipt(sale=PDV.lastSale){
   if(!sale)return false;
   const P=paperDims();
-  const css='@page{size:'+P.page+' auto;margin:'+P.margin+'}body{font-family:monospace;font-size:'+P.font+';color:#000;margin:0}'
-    +'.rc{width:'+P.content+'}.rc-h{text-align:center;line-height:1.4}.rc-s{font-size:11px}'
-    +'.rc-l{border-top:1px dashed #000;margin:6px 0}.rc-t{width:100%;border-collapse:collapse}'
-    +'.rc-t td{padding:1px 0;vertical-align:top}.r{text-align:right}'
-    +'.rc-tot td{font-size:'+P.tot+';font-weight:bold;padding-top:4px}'
-    +'.rc-cb{text-align:center;font-size:10.5px;line-height:1.45}'
-    +'.rc-f{text-align:center;margin-top:8px;font-size:10px}';
+  // Fonte do caminho HTML calibrada para caber as 42 colunas (80mm) / 32 (58mm) na
+  // bobina sem quebrar as linhas de separacao. A impressao termica real usa o caminho
+  // RAW (ESC/POS, fonte nativa da impressora) e nao depende desta medida.
+  const preFont=pdvPaper()==='58'?'8.5px':'10px';
+  const css='@page{size:'+P.page+' auto;margin:'+P.margin+'}'
+    +'body{margin:0;color:#000;font-family:"Consolas","Courier New",monospace}'
+    +'.rc{width:'+P.content+'}'
+    +'.rc-pre{font-family:"Consolas","Courier New",monospace;font-size:'+preFont+';line-height:1.3;white-space:pre;margin:0}';
   const html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Venda #'
     +sale.res.num+'</title><style>'+css+'</style></head><body>'+pdvReceiptHtml(sale)+'</body></html>';
+  const isCred=(sale.pays||[]).some(function(x){return x.m==='crediario';});
   return onpdvPrintText(pdvReceiptText(sale),'venda #'+sale.res.num,{
-    html,qr:pdvSaleIsAnonymous(sale)?ONPDV_CUSTOMER_PORTAL_URL:''
+    html,qr:(pdvSaleIsAnonymous(sale)&&!isCred)?ONPDV_CUSTOMER_PORTAL_URL:''
   });
 }
 function pdvWhatsReceipt(){
@@ -3653,7 +3741,7 @@ async function pdvReprintSale(orderId){
     if(error)throw error;
     if(!data||!data.res){toast('Venda não encontrada');return;}
     const sale={when:new Date(data.when||Date.now()),
-      items:(data.items||[]).map(i=>({name:i.name||'Item',price:+i.price||0,qty:+i.qty||1,disc:+i.disc||0,kg:!!i.kg})),
+      items:(data.items||[]).map(i=>({name:i.name||'Item',price:+i.price||0,qty:+i.qty||1,disc:+i.disc||0,kg:!!i.kg,ean:i.ean||i.codigo||i.sku||i.code||''})),
       pays:(data.pays||[]).map(pp=>({m:pp.m||'outro',v:+pp.v||0,venc:pp.venc||null,parcelas:pp.parcelas||1})),
       res:data.res,customerId:data.customer_id||data.res.customer_id||null};
     PDV.lastSale=sale; PDV._lastPhone='';
@@ -3809,28 +3897,30 @@ async function pdvXReport(){
 async function pdvPrintX(){
   const d=PDV._x;if(!d){toast('Gere a Leitura X primeiro');return;}
   const by=d.by_payment||{};
+  const width=pdvPaper()==='58'?32:42, sep='-'.repeat(width);
   const lbl={dinheiro:'Dinheiro',pix:'PIX',debito:'Cartao debito',credito:'Cartao credito',outro:'Outro'};
   const L=[];
-  L.push('=== LEITURA X ===');
-  L.push((DB.settings.storeName||'PetApp'));
-  L.push('Terminal: '+String(PDV.terminal||''));
-  L.push('Caixa n: '+String((d.session&&d.session.num)||''));
-  L.push('Emitida: '+new Date().toLocaleString('pt-BR'));
-  L.push('-----------------------------');
-  L.push('Vendas .......... '+(d.sales_count||0));
-  L.push('Faturamento ..... '+BRL(d.sales_total||0));
-  L.push('Ticket medio .... '+BRL(d.ticket_medio||0));
-  Object.keys(by).forEach(k=>L.push('  '+(lbl[k]||k)+': '+BRL(by[k])));
-  if(d.cashback_used>0)L.push('Cashback ........ '+BRL(d.cashback_used));
-  if(d.supplies>0)L.push('Suprimentos ..... '+BRL(d.supplies));
-  if(d.withdrawals>0)L.push('Sangrias ........ '+BRL(d.withdrawals));
+  L.push(pdvTextCenter(DB.settings.storeName||'PetApp',width));
+  if(DB.settings.city) L.push(pdvTextCenter(String(DB.settings.city),width));
+  L.push(pdvTextCenter('LEITURA X',width));
+  L.push(pdvTextCenter('Emitida em '+pdvDateTimeShort(new Date()),width));
+  L.push(sep);
+  L.push(pdvTextPair('Terminal',String(PDV.terminal||''),width));
+  L.push(pdvTextPair('Caixa n',String((d.session&&d.session.num)||''),width));
+  L.push(sep);
+  L.push(pdvTextPair('Vendas',String(d.sales_count||0),width));
+  L.push(pdvTextPair('Faturamento R$',pdvMoneyNum(d.sales_total||0),width));
+  L.push(pdvTextPair('Ticket medio R$',pdvMoneyNum(d.ticket_medio||0),width));
+  Object.keys(by).forEach(k=>L.push(pdvTextPair('  '+(lbl[k]||k)+' R$',pdvMoneyNum(by[k]),width)));
+  if(d.cashback_used>0)L.push(pdvTextPair('Cashback R$',pdvMoneyNum(d.cashback_used),width));
+  if(d.supplies>0)L.push(pdvTextPair('Suprimentos R$','+ '+pdvMoneyNum(d.supplies),width));
+  if(d.withdrawals>0)L.push(pdvTextPair('Sangrias R$','- '+pdvMoneyNum(d.withdrawals),width));
   const c=d.canceladas||{};
-  if(Number(c.qtd)>0)L.push('Canceladas ...... '+c.qtd+' ('+BRL(c.total||0)+')');
-  L.push('-----------------------------');
-  L.push('CONFERENCIA - NAO FECHA O CAIXA');
+  if(Number(c.qtd)>0)L.push(pdvTextPair('Canceladas',String(c.qtd)+' ('+pdvMoneyNum(c.total||0)+')',width));
+  L.push(sep);
+  L.push(pdvTextCenter('CONFERENCIA - NAO FECHA O CAIXA',width));
   return onpdvPrintText(L.join('\n'),'Leitura X');
 }
-
 /* ---------- F12 · fechar caixa ---------- */
 async function pdvCloseModal2(){
   if(!can('pdv_fechar')){toast('Você não tem permissão para fechar o caixa');return;}
@@ -3930,33 +4020,35 @@ function pdvCloseDone(){
 async function pdvPrintClose(){
   const c=PDV._closed;if(!c){toast('Feche o caixa primeiro');return;}
   const d=c.rep||{};const by=d.by_payment||{};
+  const width=pdvPaper()==='58'?32:42, sep='-'.repeat(width);
   const lbl={dinheiro:'Dinheiro',pix:'PIX',debito:'Cartao debito',credito:'Cartao credito',outro:'Outro'};
   const L=[];
-  L.push('=== FECHAMENTO DE CAIXA ===');
-  L.push((DB.settings.storeName||'PetApp'));
-  L.push('Terminal: '+String(c.terminal||''));
-  L.push('Caixa n: '+String(c.sessNum||''));
-  L.push('Fechado: '+(c.at||new Date()).toLocaleString('pt-BR'));
-  L.push('-----------------------------');
-  L.push('Vendas .......... '+(d.sales_count||0));
-  L.push('Faturamento ..... '+BRL(d.sales_total||0));
-  Object.keys(by).forEach(k=>L.push('  '+(lbl[k]||k)+': '+BRL(by[k])));
-  if(d.change_total>0)L.push('Troco devolvido . '+BRL(d.change_total));
-  if(d.cashback_used>0)L.push('Cashback ........ '+BRL(d.cashback_used));
-  L.push('-----------------------------');
-  L.push('Abertura ........ '+BRL((d.session&&d.session.opening_amount)||0));
-  if(d.supplies>0)L.push('Suprimentos ..... '+BRL(d.supplies));
-  if(d.withdrawals>0)L.push('Sangrias ........ '+BRL(d.withdrawals));
-  L.push('Dinheiro esperado '+BRL(d.expected_cash||0));
-  L.push('Dinheiro contado  '+BRL(c.counted||0));
+  L.push(pdvTextCenter(DB.settings.storeName||'PetApp',width));
+  if(DB.settings.city) L.push(pdvTextCenter(String(DB.settings.city),width));
+  L.push(pdvTextCenter('FECHAMENTO DE CAIXA',width));
+  L.push(pdvTextCenter('Impresso em '+pdvDateTimeShort(c.at||new Date()),width));
+  L.push(sep);
+  L.push(pdvTextPair('Terminal',String(c.terminal||''),width));
+  L.push(pdvTextPair('Caixa n',String(c.sessNum||''),width));
+  L.push(sep);
+  L.push(pdvTextPair('Vendas',String(d.sales_count||0),width));
+  L.push(pdvTextPair('Faturamento R$',pdvMoneyNum(d.sales_total||0),width));
+  Object.keys(by).forEach(k=>L.push(pdvTextPair('  '+(lbl[k]||k)+' R$',pdvMoneyNum(by[k]),width)));
+  if(d.change_total>0)L.push(pdvTextPair('Troco devolvido R$','- '+pdvMoneyNum(d.change_total),width));
+  if(d.cashback_used>0)L.push(pdvTextPair('Cashback R$',pdvMoneyNum(d.cashback_used),width));
+  L.push(sep);
+  L.push(pdvTextPair('Abertura R$',pdvMoneyNum((d.session&&d.session.opening_amount)||0),width));
+  if(d.supplies>0)L.push(pdvTextPair('Suprimentos R$','+ '+pdvMoneyNum(d.supplies),width));
+  if(d.withdrawals>0)L.push(pdvTextPair('Sangrias R$','- '+pdvMoneyNum(d.withdrawals),width));
+  L.push(pdvTextPair('Dinheiro esperado R$',pdvMoneyNum(d.expected_cash||0),width));
+  L.push(pdvTextPair('Dinheiro contado R$',pdvMoneyNum(c.counted||0),width));
   const a=Math.abs(c.diff||0);
-  L.push('Diferenca ....... '+(a<0.005?'sem diferenca':((c.diff>0?'sobra ':'falta ')+BRL(a))));
-  if(c.note)L.push('Obs: '+c.note);
-  L.push('-----------------------------');
-  L.push('CAIXA FECHADO');
+  L.push(pdvTextPair('Diferenca R$',(a<0.005?'sem diferenca':((c.diff>0?'sobra ':'falta ')+pdvMoneyNum(a))),width));
+  if(c.note) pdvWrapText('Obs: '+c.note,width).forEach(ln=>L.push(ln));
+  L.push(sep);
+  L.push(pdvTextCenter('CAIXA FECHADO',width));
   return onpdvPrintText(L.join('\n'),'Fechamento de caixa');
 }
-
 /* ---------- carga e saída ---------- */
 async function loadCaixa(){
   if(!navigator.onLine&&typeof pdvOfflineRestore==='function')await pdvOfflineRestore();
