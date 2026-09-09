@@ -6,7 +6,7 @@ vanilla (sem framework/bundler) sobre um backend **Supabase** (PostgreSQL), com
 integrações de pagamento (**Mercado Pago** — Point + PIX), fiscal (**NFC-e**) e
 mensageria (**WhatsApp** / Web Push).
 
-> Versão atual: **2026.09.08-v55** (ver `version.json`).
+> Versão atual: **2026.09.09-v56** (ver `version.json`).
 
 ---
 
@@ -17,6 +17,7 @@ mensageria (**WhatsApp** / Web Push).
 - [Backend (Supabase)](#backend-supabase)
 - [Integrações e segredos](#integrações-e-segredos)
 - [Principais funcionalidades](#principais-funcionalidades)
+- [Impressão térmica (cupom, fechamento, Leitura X)](#impressão-térmica-cupom-fechamento-leitura-x)
 - [Segurança](#segurança)
 - [Deploy](#deploy)
 - [Instalador do caixa (offline)](#instalador-do-caixa-offline)
@@ -143,7 +144,8 @@ Configurados como **secrets** das Edge Functions (nunca no frontend):
 ## Principais funcionalidades
 
 - **Frente de Caixa (PDV):** vendas, descontos, múltiplas formas de pagamento,
-  maquininha Point, PIX dinâmico, sangria/suprimento, vendas em espera, recibo térmico.
+  maquininha Point, PIX dinâmico, sangria/suprimento, vendas em espera, recibo térmico
+  (layout padrão PedidoOK — ver [Impressão térmica](#impressão-térmica-cupom-fechamento-leitura-x)).
 - **Crediário (contas a receber):** parcelas, recebimento no caixa, e **PIX enviado
   ao WhatsApp do cliente** — a cobrança fica em espera, pisca quando o cliente paga e,
   ao confirmar, sai o comprovante e entra no caixa.
@@ -160,6 +162,42 @@ Configurados como **secrets** das Edge Functions (nunca no frontend):
 - **Cobrança automática de crediário por PIX no WhatsApp** — *opcional, desligada por
   padrão* (Configurações → "Cobrança automática por PIX"). Enriquece o lembrete de
   vencidos com um PIX copia-e-cola; liquida via portal (`portal_pix_settle`).
+
+## Impressão térmica (cupom, fechamento, Leitura X)
+
+Toda a impressão vive em `assets/js/onpdv-app.js`. Desde a **v56** o cupom de
+pagamento adota o **layout padrão PedidoOK** — o mesmo estilo foi aplicado ao
+**Fechamento de caixa** e à **Leitura X**.
+
+**Layout do cupom** (função-núcleo `pdvReceiptPlain`):
+- Cabeçalho centralizado (loja, cidade, `Impresso em`, `SEM VALOR FISCAL`);
+- Dados do pedido (`Pedido / Numero`, `Emissao`, cliente);
+- Tabela de itens `# CODIGO DESCRICAO` / `QTD UN VL UN R$ … VL ITEM R$`
+  (descrição quebra em várias linhas; código vem de `ean`/`sku`/`codigo`);
+- `Subtotal`, `Frete/Entrega`, `TOTAL`;
+- `FORMA DE PAGAMENTO` e bloco `PARCELAS`.
+
+**Canhoto (via de assinatura):** sai **apenas quando a venda é no crediário** — um
+segundo bloco reduzido com as parcelas/vencimentos e a linha `assinatura do
+cliente`. Vendas à vista/PIX/cartão não imprimem canhoto.
+
+**Dois caminhos de impressão:**
+- **RAW ESC/POS** (caixa desktop, via *bridge* local `/api/print` → `print-raw.ps1`):
+  é o que imprime de fato na térmica (ex.: Epson TM-T20, codepage PC860). Enviado
+  como texto de coluna fixa (42 col a 80 mm / 32 a 58 mm), centralizado na bobina.
+- **HTML `<pre>`** (fallback navegador/nuvem, quando não há *bridge* local): mesmo
+  texto renderizado em fonte monoespaçada, então **a pré-visualização é igual à
+  impressão**.
+
+**Caracteres especiais:** todo texto que vai para a impressora passa por
+`pdvAscii()` no ponto único de saída (`onpdvPrintText`) — acentos viram a
+letra-base (á→a, ç→c, ã→a, õ→o), sinais especiais viram equivalentes simples e
+emoji são removidos. Assim o cupom sai limpo em qualquer impressora, sem depender
+da tabela de caracteres.
+
+**Bobina:** 80 mm (padrão) ou 58 mm, configurável **por terminal** (fica no
+`localStorage` da máquina — é característica física da impressora, não dado de
+negócio).
 
 ## Segurança
 
@@ -192,13 +230,19 @@ O caixa roda localmente a partir de um instalador `.bat` que embute o site. Gera
 
 ```powershell
 # na raiz do repositório
-scripts\build-installer.ps1 -Release '2026.09.07-v54'
+scripts\build-installer.ps1 -Release '2026.09.09-v56'
 # opcional: minifica os assets do bundle (conservador, sem renomear identificadores)
-scripts\build-installer.ps1 -Release '2026.09.07-v54' -Minify
+scripts\build-installer.ps1 -Release '2026.09.09-v56' -Minify
 ```
 
 Gera `downloads/onpdv-caixa.bat` (+ `.zip`) e carimba o cache do Service Worker com a
 versão. Ao subir versão nova, atualize `version.json` e o badge em `partials/onpdv-app.html`.
+
+> **Nota (ambiente Windows):** a validação do pacote usa `tar`. Se o Git Bash estiver
+> no `PATH`, o `tar` dele intercepta e o build falha (`Cannot connect to C:`). Rode
+> com o `tar` do Windows à frente:
+> `powershell -Command "$env:PATH='C:\Windows\System32;'+$env:PATH; & scripts\build-installer.ps1 -Release '2026.09.09-v56'"`.
+> A validação roda **antes** de sobrescrever `downloads/`, então uma falha aí não corrompe o pacote atual.
 
 ## Desenvolvimento, CI e testes
 
@@ -211,10 +255,14 @@ versão. Ao subir versão nova, atualize `version.json` e o badge em `partials/o
 
 ## Versionamento
 
-Três lugares devem bater ao publicar:
-1. `version.json` → `"version"` (ex.: `2026.09.07-v54`);
+Três lugares devem bater ao publicar (ex. atual: `2026.09.09-v56`):
+1. `version.json` → `"version"`;
 2. badge em `partials/onpdv-app.html`;
-3. `const CACHE` em `sw.js` (o build carimba a cópia do bundle automaticamente).
+3. `const CACHE` em `sw.js` (o build carimba a cópia do bundle; no repositório,
+   atualize manualmente para o site web pegar a versão nova).
+
+O pacote pronto para o Vercel fica em `publicar-site-v56/` (e no `.zip` de mesmo
+nome), com `PUBLICAR.txt` descrevendo a release.
 
 ## Pendências de configuração
 
