@@ -131,7 +131,6 @@
     const nq = normTxt(q||''); const body = $('#cmpCatBody_' + label); if(!body) return;
     body.querySelectorAll('tr').forEach(tr => { tr.style.display = (!nq || (tr.dataset.cmpname||'').includes(nq)) ? '' : 'none'; });
   };
-  window.cmpListAdd = (label, pid, sug) => { const m = cmpListGet(label); m[pid] = num(m[pid]) || sug || 1; cmpListSet(label, m); cmpRenderLista(label); };
   window.cmpListRemove = (label, pid) => { const m = cmpListGet(label); delete m[pid]; cmpListSet(label, m); cmpRenderLista(label); };
   window.cmpListQty = (label, pid, val) => { const m = cmpListGet(label); const q = num(val); if(q>0) m[pid] = q; else delete m[pid]; cmpListSet(label, m); const c = $('#cmpListCount_'+label); if(c) c.textContent = Object.keys(m).length; };
   window.cmpListToOrder = label => { const sel = $('#cmpPoList'); if(sel) sel.value = label; openBoPage('cmpPedido'); };
@@ -172,7 +171,6 @@
     Object.keys(map).forEach(pid => { const p = cmpProd(pid); if(!p) return; CMP.order[pid] = { qty: num(map[pid])||0, custo: Number(p.custo)||0, sel: true }; });
     cmpRenderOrderSelection();
   }
-  window.cmpPoSourceChange = cmpBuildOrderFromList;
   function cmpRenderOrderSelection(){
     const box = $('#cmpPoSelection'), empty = $('#cmpPoEmpty');
     const ids = Object.keys(CMP.order||{});

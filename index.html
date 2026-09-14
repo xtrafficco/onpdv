@@ -34,8 +34,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="ONPDV Caixa">
 
-<!-- Leaflet (mapa de rastreio em tempo real) — local, para funcionar como PWA e ser cacheado. -->
-<link rel="stylesheet" href="lib/leaflet/leaflet.css">
+<!-- Leaflet (mapa de rastreio) NÃO entra aqui: o CSS e o JS dele são injetados por
+     ensureLeaflet() quando alguma tela de mapa abre. Continuam no SHELL do Service
+     Worker, então seguem funcionando offline depois da primeira visita. -->
 
 <!-- Gerador de QR local (qrcode-generator, MIT) — para "Meu código no caixa"; local p/ funcionar como PWA e ser cacheado. -->
 

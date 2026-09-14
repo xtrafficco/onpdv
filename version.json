@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.09-v56",
+  "version": "2026.09.14-v57",
   "installer": "/downloads/onpdv-caixa.bat",
-  "notes": "Novo layout de impressão dos recibos de pagamento (padrão PedidoOK): cabeçalho, tabela de itens com código, FORMA DE PAGAMENTO e PARCELAS. Canhoto com assinatura do cliente sai apenas quando a venda é no crediário. O mesmo layout foi aplicado ao Fechamento de caixa e à Leitura X. Correção de caracteres especiais: todo texto enviado à impressora é normalizado para ASCII, então acentos e símbolos saem sempre corretos."
+  "notes": "Crediário: o vencimento das parcelas passa a ser mensal e igual nos dois lados — antes o cupom somava mês de calendário e o servidor somava 30 dias, então o carnê e o papel divergiam a partir da 2ª parcela. A 2ª via de venda no crediário voltou a reimprimir as parcelas com data. Correções: a tela 'Erros do caixa' (Auditoria) não aparecia por causa de um id repetido no HTML; o portal do cliente voltou a permitir zoom; o app do entregador ganhou o botão de sair da conta; portal, entregador e vitrine passaram a abrir offline de verdade. O caixa instalado volta a ser avisado quando sai versão nova (faltava CORS no version.json). Login mais leve: o mapa só é baixado quando alguém abre uma tela de mapa."
 }

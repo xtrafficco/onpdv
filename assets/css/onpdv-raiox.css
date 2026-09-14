@@ -17,7 +17,6 @@
 #page-raiox .rx-pos{color:var(--rx-pos)}
 #page-raiox .rx-neg{color:var(--rx-neg)}
 #page-raiox .rx-warn{color:var(--rx-warn)}
-#page-raiox .rx-hide{display:none!important}
 
 /* ---------- barra de controle ---------- */
 .rx-topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;justify-content:space-between;margin-bottom:14px}
@@ -44,9 +43,9 @@
 #page-raiox .rx-grid{display:grid;gap:12px}
 #page-raiox .rx-g4{grid-template-columns:repeat(4,1fr)}
 #page-raiox .rx-g3{grid-template-columns:repeat(3,1fr)}
-#page-raiox .rx-g2{grid-template-columns:repeat(2,1fr)}
+
 @media(max-width:1200px){#page-raiox .rx-g4{grid-template-columns:repeat(2,1fr)}#page-raiox .rx-g3{grid-template-columns:1fr 1fr}}
-@media(max-width:720px){#page-raiox .rx-g4,#page-raiox .rx-g3,#page-raiox .rx-g2{grid-template-columns:1fr}}
+@media(max-width:720px){#page-raiox .rx-g4,#page-raiox .rx-g3{grid-template-columns:1fr}}
 
 #page-raiox .rx-kpi{background:#fff;border:1px solid var(--rx-line);border-radius:var(--rx-r);padding:13px 15px;box-shadow:var(--rx-sh)}
 #page-raiox .rx-kpi .rx-lb{font-size:11px;color:var(--rx-tx2);text-transform:uppercase;letter-spacing:.3px;font-weight:800}
@@ -67,7 +66,7 @@
 #page-raiox table.rx-tb tr.rx-sub2 td:first-child{padding-left:26px}
 
 #page-raiox .rx-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:800;white-space:nowrap}
-#page-raiox .rx-pill.rx-p{background:var(--rx-possoft);color:var(--rx-pos)}
+
 #page-raiox .rx-pill.rx-n{background:var(--rx-negsoft);color:var(--rx-neg)}
 #page-raiox .rx-pill.rx-w{background:var(--rx-warnsoft);color:var(--rx-warn)}
 #page-raiox .rx-pill.rx-a{background:var(--rx-accsoft);color:var(--rx-acc)}
@@ -77,16 +76,16 @@
 /* ---------- achados ---------- */
 #page-raiox .rx-find{border:1px solid var(--rx-line);border-left:4px solid var(--rx-tx3);border-radius:10px;
   padding:12px 15px;margin-bottom:10px;background:#fff}
-#page-raiox .rx-find.rx-c{border-left-color:var(--rx-neg)}
+
 #page-raiox .rx-find.rx-a{border-left-color:var(--rx-warn)}
-#page-raiox .rx-find.rx-b{border-left-color:var(--rx-acc)}
+
 #page-raiox .rx-find h3{font-family:'Fredoka',sans-serif;margin:0 0 4px;font-size:15px;display:flex;gap:8px;
   align-items:baseline;flex-wrap:wrap}
 #page-raiox .rx-find .rx-sev{font-size:10px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
   padding:2px 7px;border-radius:5px}
-#page-raiox .rx-find.rx-c .rx-sev{background:var(--rx-negsoft);color:var(--rx-neg)}
+
 #page-raiox .rx-find.rx-a .rx-sev{background:var(--rx-warnsoft);color:var(--rx-warn)}
-#page-raiox .rx-find.rx-b .rx-sev{background:var(--rx-accsoft);color:var(--rx-acc)}
+
 #page-raiox .rx-find p{margin:5px 0 0;font-size:13px;color:var(--rx-tx2);line-height:1.6}
 #page-raiox .rx-find .rx-do{margin-top:8px;padding:9px 11px;background:#f7f9fb;border-radius:8px;font-size:12.5px;line-height:1.6}
 #page-raiox .rx-find .rx-do b{color:var(--rx-tx)}
@@ -111,10 +110,7 @@
 #page-raiox .rx-toc span{color:var(--rx-acc);font-weight:800;margin-right:7px}
 @media(max-width:700px){#page-raiox .rx-toc{columns:1}}
 #page-raiox .rx-st{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:0}
-#page-raiox .rx-st.rx-ok{background:var(--rx-pos)}
-#page-raiox .rx-st.rx-at{background:var(--rx-warn)}
-#page-raiox .rx-st.rx-ru{background:var(--rx-neg)}
-#page-raiox .rx-st.rx-na{background:#c7cfd9}
+
 #page-raiox svg text{font-family:'Nunito',sans-serif}
 
 /* ---------- capa do relatório ---------- */

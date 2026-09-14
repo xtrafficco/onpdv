@@ -3,7 +3,7 @@
 //  • entregador.html → app do entregador
 // Estratégia: navegação = network-first (pega a versão nova; cai no cache quando offline);
 // estáticos (ícones, lib) = cache-first. Chamadas ao Supabase NUNCA são cacheadas.
-const CACHE = 'onpdv-2026.09.09-v56';
+const CACHE = 'onpdv-2026.09.14-v57';
 // supabase-js fixado (mesma versão+SRI do HTML): pré-cacheado para os apps abrirem
 // offline mesmo se a CDN estiver fora do ar.
 const SUPABASE_LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8';
@@ -19,6 +19,12 @@ const SHELL = [
   './entregador.html',
   './vitrine.html',
   './cliente.html',
+  // O JS de cada portal junto com a página dele. A casca sozinha não serve de nada:
+  // entregador/vitrine/cliente têm o CSS embutido no <style>, mas o comportamento
+  // inteiro vive nestes três arquivos — sem eles a página abre offline e não faz nada.
+  './assets/js/entregador.js',
+  './assets/js/vitrine.js',
+  './assets/js/cliente.js',
   './manifest.webmanifest',
   './app.webmanifest',
   './vitrine.webmanifest',
@@ -169,12 +175,19 @@ self.addEventListener('notificationclick', (e) => {
   const target = (e.notification.data && e.notification.data.url) || './index.html';
   const targetUrl = new URL(target, self.registration.scope).href;
   e.waitUntil((async () => {
-    const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const wins = (await self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
+      .filter((c) => c.url.startsWith(self.registration.scope) && 'focus' in c);
+    // Reaproveita uma janela já aberta, mas só se for do MESMO app. Antes qualquer
+    // janela sob o escopo servia: um push de entrega clicado com o caixa aberto
+    // focava o caixa e a tela do entregador nunca aparecia.
+    const alvoArquivo = targetUrl.split('/').pop();
+    const mesmaTela = wins.find((c) => c.url.split('?')[0].endsWith(alvoArquivo))
+      || (alvoArquivo === 'index.html' ? wins.find((c) => c.url.replace(self.registration.scope, '').split('?')[0] === '') : null);
+    if (mesmaTela) { try { await mesmaTela.focus(); return; } catch (_) { /* segue */ } }
+    // Tem janela aberta, mas de outra tela: navega ela em vez de abrir mais uma.
     for (const c of wins) {
-      // Reaproveita uma janela já aberta do mesmo app em vez de abrir outra.
-      if (c.url.startsWith(self.registration.scope) && 'focus' in c) {
-        try { await c.focus(); return; } catch (_) { /* segue para openWindow */ }
-      }
+      try { const nav = c.navigate ? await c.navigate(targetUrl) : null; await (nav || c).focus(); return; }
+      catch (_) { /* navegação entre documentos pode ser recusada: tenta a próxima */ }
     }
     if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
   })());

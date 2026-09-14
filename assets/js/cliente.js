@@ -300,9 +300,13 @@ window.paySelected=async()=>{
 };
 window.setSub=async(id,status)=>{const {error}=await sb.rpc('portal_set_subscription_status',{p_subscription:id,p_status:status});if(error){toast('Não foi possível alterar.');return;}toast(status==='paused'?'Assinatura pausada.':'Assinatura retomada ✅');load();};
 (async()=>{const {data:{session}}=await sb.auth.getSession();if(session)await load();})();
-// bloqueia zoom por pinça/duplo-toque no iOS (que ignora user-scalable=no)
-['gesturestart','gesturechange','gestureend'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
-let lastTouch=0;document.addEventListener('touchend',e=>{const n=Date.now();if(n-lastTouch<=350)e.preventDefault();lastTouch=n;},{passive:false});
+// Nada de bloquear zoom aqui. Havia um par de listeners que cancelava os eventos de
+// pinça do iOS e o segundo toque de um duplo-toque: é violação de WCAG 1.4.4 (o
+// portal é a tela que mais gente lê em celular), e o cancelamento do toque dentro de
+// 350 ms também engolia toques rápidos em sequência num mesmo botão. O que evita o
+// autozoom do iOS é campo com fonte >= 16px, que o portal já usa — não precisa tirar
+// o zoom de ninguém. Guarda 8 do scripts/check-frontend.mjs impede a volta; os nomes
+// dos eventos ficam fora deste comentário de propósito, para não virar falso positivo.
 if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 
 // ===== Delegação de cliques (CSP sem unsafe-inline) =====

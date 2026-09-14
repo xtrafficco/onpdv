@@ -31,6 +31,37 @@ let CB_ACTIVE = false;   // programa de cashback ligado? (controla o resgate no 
 async function loadCashbackActive(){ try{ const { data, error } = await sb.rpc('cashback_config_get'); if(error) throw error; CB_ACTIVE = !!(data && data.ativo); refCachePut('cashback_active', CB_ACTIVE, true); }catch(e){ const c = isNetworkErr(e) ? await refCacheGet('cashback_active') : undefined; CB_ACTIVE = (c===undefined) ? false : !!c; } }
 let POS_CHAN = null;
 
+/* ===== Leaflet sob demanda =====
+   O mapa aparece em três lugares e nenhum deles é o caminho de uma venda:
+   rastreio no PDV, rastreio na aba Entregas e o pino da loja em Configurações.
+   Antes o bootstrap baixava lib/leaflet/leaflet.js (144 KB) + leaflet.css (13 KB)
+   em TODO login, com `await`, antes até de carregar o onpdv-app.js — o caixa que
+   nunca abre mapa pagava esse peso no boot, e ainda serializado.
+
+   Mesmo padrão do Raio-X e do Compras. Os arquivos continuam no SHELL do Service
+   Worker, então o mapa segue disponível offline depois da primeira visita — e as
+   três telas já sabiam degradar com `typeof L === 'undefined'`, que é exatamente o
+   que acontece se o carregamento falhar. */
+let LEAFLET_LOADING = null;
+function ensureLeaflet(){
+  if(typeof L!=='undefined') return Promise.resolve();
+  if(LEAFLET_LOADING) return LEAFLET_LOADING;
+  LEAFLET_LOADING = new Promise((resolve,reject)=>{
+    if(!document.querySelector('link[data-onpdv-leaflet]')){
+      const css=document.createElement('link');
+      css.rel='stylesheet'; css.href='lib/leaflet/leaflet.css';
+      css.dataset.onpdvLeaflet='1';
+      document.head.appendChild(css);
+    }
+    const s=document.createElement('script');
+    s.src='lib/leaflet/leaflet.js';
+    s.addEventListener('load',resolve,{once:true});
+    s.addEventListener('error',()=>reject(new Error('Falha ao carregar o mapa.')),{once:true});
+    document.body.appendChild(s);
+  }).catch(err=>{ LEAFLET_LOADING=null; throw err; });
+  return LEAFLET_LOADING;
+}
+
 function toast(msg, err){ const t=$('#toast'); t.setAttribute('role',err?'alert':'status'); t.setAttribute('aria-live',err?'assertive':'polite'); t.textContent=msg; t.className='toast show'+(err?' err':''); clearTimeout(toast.t); toast.t=setTimeout(()=>t.className='toast',2600); }
 let MODAL_RETURN_FOCUS=null, MODAL_KEY_HANDLER=null, A11Y_SEQ=0;
 function dialogFocusable(root){return [...root.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(x=>!x.classList.contains('hide')&&x.offsetParent!==null);}
@@ -236,12 +267,12 @@ function lgRecordSuccess(email){
 }
 // aplica (ou remove) o bloqueio na UI; retorna true se ainda está bloqueado
 function lgApplyLock(email){
-  const btn=$('#btnLogin'), su=$('#btnSignup'), left=lgLockedFor(email);
+  const btn=$('#btnLogin'), left=lgLockedFor(email);
   if(lgTimer){ clearInterval(lgTimer); lgTimer=null; }
-  if(left<=0){ if(btn) btn.disabled=false; if(su) su.disabled=false; if($('#liMsg').dataset.lock){ $('#liMsg').textContent=''; delete $('#liMsg').dataset.lock; } return false; }
+  if(left<=0){ if(btn) btn.disabled=false; if($('#liMsg').dataset.lock){ $('#liMsg').textContent=''; delete $('#liMsg').dataset.lock; } return false; }
   const paint=(l)=>{ $('#liMsg').textContent='🔒 Muitas tentativas. Tente novamente em '+fmtDur(l)+'.'; $('#liMsg').dataset.lock='1'; };
-  if(btn) btn.disabled=true; if(su) su.disabled=true; paint(left);
-  lgTimer=setInterval(()=>{ const l=lgLockedFor(email); if(l<=0){ clearInterval(lgTimer); lgTimer=null; if(btn) btn.disabled=false; if(su) su.disabled=false; $('#liMsg').textContent=''; delete $('#liMsg').dataset.lock; } else paint(l); },1000);
+  if(btn) btn.disabled=true; paint(left);
+  lgTimer=setInterval(()=>{ const l=lgLockedFor(email); if(l<=0){ clearInterval(lgTimer); lgTimer=null; if(btn) btn.disabled=false; $('#liMsg').textContent=''; delete $('#liMsg').dataset.lock; } else paint(l); },1000);
   return true;
 }
 // mensagens genéricas — não revelam se a conta existe (anti-enumeração)
@@ -498,8 +529,6 @@ async function onLogin(session){
   await Promise.allSettled([loadProducts(), loadCustomers(), loadTerminals(), loadCompany(), loadSuppliers(), loadFreteRules(), loadCashbackActive(), loadPromos(), loadEdgeCapabilities(['pdv-customer-express'])]);
   if(navigator.onLine) markRefSynced();   // registra a idade do snapshot online
   buildPdvCatalog();
-  const d=new Date(); d.setDate(d.getDate()+30);
-  const cv=$('#credVenc'); if(cv) cv.value = d.toISOString().slice(0,10);
   const hoje=new Date().toISOString().slice(0,10);
   $('#repIni').value=hoje; $('#repFim').value=hoje;
   try{ await refreshCash(); }catch(e){}   // offline: caixa/gaveta seguem sem travar o login
@@ -683,8 +712,6 @@ async function checkPickups(){
   if(!CURRENT_STORE) return;
   const { data } = await sb.rpc('erp_pending_pickups',{ p_store:CURRENT_STORE });
   PENDING_PICKUPS = +data||0;
-  const btn=$('#fcDeliv'); if(btn) btn.classList.toggle('blink', PENDING_PICKUPS>0);
-  const cnt=$('#fcDelivCount'); if(cnt){ cnt.textContent=PENDING_PICKUPS; cnt.classList.toggle('hide', PENDING_PICKUPS<=0); }
   const nav=$('.bo-nav button[data-page="entregas"]'); if(nav) nav.classList.toggle('blink', PENDING_PICKUPS>0);
 }
 function startPickupPoll(){ clearInterval(pickupTimer); checkPickups(); pickupTimer=setInterval(checkPickups, 15000); }
@@ -722,10 +749,6 @@ async function loadTerminals(){
   }, true);
   const data=_t;
   TERMINALS = data||[];
-  const sel = $('#posTerm');
-  if(sel) sel.innerHTML = TERMINALS.length
-    ? TERMINALS.map(t=>`<option value="${t.id}">${esc(t.nome)}</option>`).join('')
-    : '<option value="">— cadastre em Config —</option>';
 }
 async function loadStores(){
   const { data } = await refetch('stores', async ()=>{
@@ -1016,7 +1039,7 @@ window.pdvOfflineCacheState = function(){
 // ============ CHECAGEM DE NOVA VERSÃO (caixa instalado) ============
 // O caixa roda dos arquivos locais; para saber se saiu versão nova, consulta o version.json
 // do site publicado e avisa (com link para baixar o instalador). Não aplica sozinho.
-const ONPDV_VERSION='2026.09.09-v56';
+const ONPDV_VERSION='2026.09.14-v57';
 const ONPDV_SITE='https://onpdv.vercel.app';
 // O badge do card "Instalador da Frente de Caixa" mostra a mesma versão. Preenchemos
 // por aqui para não existir um segundo lugar no código que alguém precise lembrar de
@@ -1206,7 +1229,6 @@ window.go=function(){ if(typeof exitPdv==='function')exitPdv(); };
 // O operador escolhe no caixa: débito, crédito ou PIX. A cobrança vai direto
 // para o visor da maquininha (edge function pos-cloud-charge → Mercado Pago Point).
 function pdvCaixaCfg(){ try{ return (PDV.terminals||[]).find(t=>t.code===PDV.terminal)||null; }catch(e){ return null; } }
-function pdvBoundMachineId(){ const c=pdvCaixaCfg(); return (c&&c.payment_terminal_id)||null; }
 // Ids das maquininhas vinculadas a este caixa (N:N); cai no vínculo 1:1 legado.
 function pdvLinkedMachineIds(){ const c=pdvCaixaCfg(); if(c&&Array.isArray(c.machine_ids)&&c.machine_ids.length) return c.machine_ids.slice(); if(c&&c.payment_terminal_id) return [c.payment_terminal_id]; return []; }
 // Maquininhas visíveis para este caixa: as vinculadas (se houver), senão todas.
@@ -2767,6 +2789,7 @@ async function pdvDeliveryMapModal(){
     +'<div id="pdvTrkMap" style="height:min(62vh,520px);border-radius:12px;overflow:hidden;background:#0b1830"></div>'
     +'<div class="pdv-btns"><button class="pdv-btn ghost" data-onclick="pdvDeliveryQueue()">← Voltar para a fila</button></div>', true);
   const st=document.getElementById('pdvTrkStatus');
+  try{ await ensureLeaflet(); }catch(e){}
   if(typeof L==='undefined'){ if(st)st.textContent='Mapa indisponível (offline). Reconecte para rastrear.'; return; }
   const el=document.getElementById('pdvTrkMap'); if(!el) return;
   PDV_TRK.map=L.map(el,{zoomControl:true}).setView([-14.235,-51.925],4);
@@ -3616,7 +3639,18 @@ function pdvWrapText(text,width){
 function pdvDateShort(d){ var x=(d instanceof Date)?d:new Date(d); if(isNaN(x))return ''; var p=function(n){return String(n).padStart(2,'0');}; return p(x.getDate())+'/'+p(x.getMonth()+1)+'/'+String(x.getFullYear()).slice(-2); }
 function pdvDateTimeShort(d){ var x=(d instanceof Date)?d:new Date(d); if(isNaN(x))return ''; var p=function(n){return String(n).padStart(2,'0');}; return pdvDateShort(x)+' '+p(x.getHours())+':'+p(x.getMinutes()); }
 function pdvVencDate(v){ if(!v)return null; var s=String(v),d=s.length>10?new Date(s):new Date(s+'T00:00:00'); return isNaN(d)?null:d; }
-function pdvAddMonths(d,m){ var x=new Date(d.getTime()); x.setMonth(x.getMonth()+m); return x; }
+// Soma meses grudando no último dia quando o mês de destino é mais curto.
+// O setMonth cru do JS vaza: 31/01 + 1 mês vira 03/03, então a 2ª parcela do carnê
+// pulava fevereiro inteiro e ainda era impressa depois da 3ª (31/03). Agora 31/01
+// + 1 mês é 28/02 (29/02 em ano bissexto), que é o que o cliente espera ler.
+function pdvAddMonths(d,m){
+  var x=new Date(d.getTime()), dia=x.getDate();
+  x.setDate(1);                                                   // tira o dia da jogada
+  x.setMonth(x.getMonth()+m);
+  var ultimoDia=new Date(x.getFullYear(),x.getMonth()+1,0).getDate();
+  x.setDate(Math.min(dia,ultimoDia));
+  return x;
+}
 function pdvPayMethodLabel(m){ return ({dinheiro:'DINHEIRO',pix:'PIX',debito:'CARTAO DEBITO',credito:'CARTAO CREDITO',crediario:'CREDIARIO',outro:'OUTRO'})[m]||String(m||'').toUpperCase(); }
 // Linha "cliente" do cabecalho: <prefixo do pedido>-<nome> ou "Consumidor Final"
 function pdvReceiptCustomer(sale){
@@ -5794,7 +5828,10 @@ async function renderAudit(){
 // A RPC erp_client_errors filtra por is_admin() dentro dela, então para operador a
 // consulta volta vazia em vez de dar erro — a tela degrada sozinha.
 async function ceLoad(){
-  const body=$('#ceBody'); if(!body) return;
+  // #ceErrBody, não #ceBody: a Contagem por exceção já usava #ceBody. Com o id
+  // repetido, $('#ceBody') devolvia sempre o primeiro (a Contagem) — esta tabela
+  // nunca aparecia e abrir a Auditoria ainda estragava a outra.
+  const body=$('#ceErrBody'); if(!body) return;
   const dias=+(($('#ceDias')&&$('#ceDias').value)||7);
   body.innerHTML='<tr><td colspan="8" class="muted">Carregando…</td></tr>';
   try{
@@ -6850,8 +6887,10 @@ function storeMapWarn(msg){
   const info=document.getElementById('stGeoInfo');
   if(info){ info.textContent='⚠️ '+msg; info.style.color='var(--red)'; }
 }
-function storeMapInit(lat,lng){
+async function storeMapInit(lat,lng){
   const el=document.getElementById('stMap'); if(!el) return;
+  try{ await ensureLeaflet(); }catch(e){}
+  if(!document.getElementById('stMap')) return;   // modal fechou durante o download
   if(typeof L==='undefined'){ el.innerHTML='<div class="muted" style="padding:14px;font-size:12px">Mapa indisponível offline — informe o CEP e ajuste a posição quando online.</div>'; return; }
   storeMapDestroy();
   const has=isFinite(lat)&&isFinite(lng);
@@ -7610,8 +7649,11 @@ function trkInit(){
   TRK.layer = L.layerGroup().addTo(TRK.map);
   return TRK.map;
 }
-function trkStart(){
+async function trkStart(){
   const st=document.getElementById('trkStatus');
+  if(st && typeof L==='undefined') st.textContent='carregando o mapa…';
+  try{ await ensureLeaflet(); }catch(e){}
+  if(currentPage!=='entregas') return;            // saiu da aba durante o download
   if(typeof L==='undefined'){ if(st) st.textContent='mapa indisponível (offline)'; return; }
   trkInit(); if(!TRK.map) return;
   setTimeout(()=>{ try{ TRK.map.invalidateSize(); }catch(e){} }, 200);
@@ -8038,6 +8080,10 @@ function showMoto(){
   MOTO_TIMER=setInterval(()=>{ if(!$('#moto').classList.contains('hide')) loadMotoList(true); }, 20000);
 }
 { const b=$('#btnMotoRefresh'); if(b) b.onclick=()=>{ loadMotoList(); toast('Lista atualizada'); }; }
+// O botão "Sair da conta" da tela do motoboy existia no HTML sem nenhum handler:
+// o entregador não tinha como sair pelo próprio app. Mesmo escopo do #btnLogout
+// (só este aparelho; os outros caixas com o mesmo login seguem ativos).
+{ const b=$('#btnMotoLogout'); if(b) b.onclick=async()=>{ await sb.auth.signOut({scope:'local'}); location.reload(); }; }
 function motoCard(r, tipo){
   const wa=(r.fone||'').replace(/\D/g,'');
   const pago = r.pago ? '<span class="chip ok">pago</span>' : `<span class="chip amber">cobrar ${BRL(r.total)}</span>`;

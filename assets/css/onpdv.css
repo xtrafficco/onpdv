@@ -72,15 +72,12 @@ button.sm:not(.btn):not(.pdv-btn),button.mini:not(.btn):not(.pdv-btn),button.b:n
 
 /* ---------- app shell ---------- */
 #app{min-height:100dvh;display:flex;flex-direction:column}
-.topbar{background:var(--dark);color:#fff;display:flex;align-items:center;gap:6px;padding:9px 14px;position:sticky;top:0;z-index:40;box-shadow:0 2px 10px rgba(0,0,0,.18)}
-.topbar .brand{font-size:21px;color:#fff}
-.topbar .brand .on{font-size:18px}
+
 .nav{display:flex;gap:3px;margin-left:10px;flex-wrap:wrap}
 .nav button{color:#c9d6f5;padding:8px 13px;border-radius:8px;font-weight:800;font-size:14px}
 .nav button.act{background:var(--dark3);color:#fff}
 .nav button:hover{color:#fff}
-.topbar .who{margin-left:auto;display:flex;align-items:center;gap:9px;font-size:13px;color:#c9d6f5}
-.topbar .who b{color:#fff}
+
 .page{display:none}.page.act{display:block}
 
 /* ---------- cards ---------- */
@@ -140,8 +137,6 @@ tr:hover td{background:#f7f9ff}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .qrbox{text-align:center;padding:8px}
 .qrbox img{width:230px;height:230px;border-radius:12px;border:1px solid var(--line)}
-.copybox{display:flex;gap:6px;margin-top:10px}
-.copybox input{font-size:12px}
 
 .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--dark2);color:#fff;padding:12px 20px;border-radius:10px;font-weight:800;z-index:300;box-shadow:0 10px 30px rgba(0,0,0,.3);opacity:0;transition:opacity .2s,transform .2s}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -167,61 +162,14 @@ tr.clickrow:hover{background:#f2f6ff}
   .pdv-grid{grid-template-columns:1fr}
   .nav{order:3;width:100%;margin:6px 0 0;justify-content:space-between}
   .nav button{flex:1;padding:8px 4px;font-size:12.5px}
-  .topbar{flex-wrap:wrap}.topbar .who{order:2}
+
   .grid2{grid-template-columns:1fr}
 }
-/* ===== FRENTE DE CAIXA ===== */
-.fc{ display:flex; flex-direction:column; min-height:calc(100vh - 128px); color:#fff; margin:-8px -4px 0; }
-.fc-consumidor{ font-family:Fredoka,sans-serif; font-size:26px; font-weight:600; letter-spacing:.5px; }
-.fc-body{ display:grid; grid-template-columns:264px 1fr; gap:16px; flex:1; }
-.fc-left{ display:flex; flex-direction:column; }
-.fc-in{ width:100%; padding:11px 12px; border-radius:9px; border:2px solid #2c4a9e; background:#fff; color:#12307a;
-  font-size:16px; font-weight:600; outline:none; box-sizing:border-box; text-align:left; }
-.fc-in:focus{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(255,207,63,.25); }
-#fcQty,#fcUnit,#fcTotalIn{ text-align:right; }
-.fc-keys{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:16px; }
-.fckey{ background:#1b3d86; color:#7f97cf; border:none; border-radius:9px; padding:11px 10px; font-size:12.5px;
-  font-weight:700; text-align:left; cursor:pointer; line-height:1.15; transition:.12s; }
-.fckey.on{ background:#fff; color:#12307a; }
-.fckey.on:hover{ background:var(--accent); }
-.fckey:last-child{ grid-column:1 / -1; max-width:calc(50% - 4px); }
-.fc-main{ display:flex; flex-direction:column; min-width:0; }
-.fc-items-wrap{ position:relative; flex:1; background:rgba(255,255,255,.03); border-radius:10px; margin-top:6px;
-  min-height:340px; overflow:auto; }
-.fc-table{ width:100%; border-collapse:collapse; }
-.fc-table thead th{ position:sticky; top:0; background:#0e2660; color:#9fb2e0; font-size:11.5px; letter-spacing:.4px;
-  text-align:left; padding:12px 14px; font-weight:800; }
-.fc-table thead th.r{ text-align:right; }
-.fc-table tbody td{ padding:12px 14px; font-size:14px; border-bottom:1px solid rgba(255,255,255,.06); color:#eaf0ff; }
-.fc-table tbody td.r{ text-align:right; }
-.fc-table tbody tr.sel{ background:rgba(255,207,63,.14); }
-.fc-hint{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:6px; color:#8ea3d4; text-align:center; pointer-events:none; }
-.fc-hint b{ color:#cfe; }
-.fc-foot{ display:flex; align-items:center; justify-content:space-between; padding:12px 4px 8px; gap:16px; }
-.fc-foot-l{ display:flex; gap:10px; }
-.fc-foot-l>div{ background:#0e2660; border:1px solid #2c4a9e; border-radius:9px; padding:6px 12px; min-width:88px; }
-.fc-foot-l span{ display:block; font-size:11px; color:#9fb2e0; }
-.fc-foot-l b{ font-size:16px; }
-.fc-total{ font-family:Fredoka,sans-serif; font-size:20px; color:#c9d6f5; }
-.fc-total b{ font-size:34px; color:#fff; margin-left:8px; }
-.fc-status{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
-  background:#0b1f52; border-radius:9px; padding:8px 12px; font-size:12.5px; color:#c9d6f5; margin-top:4px; }
-.fc-status-r{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.fc-status-r button{ background:#12307a; color:#dbe6ff; border:1px solid #2c4a9e; border-radius:7px;
-  padding:4px 10px; font-size:12px; font-weight:700; cursor:pointer; }
-.fc-status-r button:hover{ background:#1b3d86; }
-.fc-online{ display:inline-flex; align-items:center; gap:5px; background:rgba(74,222,128,.16); color:#4ade80; font-weight:700; padding:4px 11px; border-radius:999px; border:1px solid rgba(74,222,128,.45); font-size:12.5px; line-height:1; }
-/* modal finalizar venda */
-.fin-pay{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin:9px 0; }
-.fin-pay label{ font-weight:700; color:#2a3c66; }
-.fin-pay input{ width:190px; text-align:right; padding:11px 12px; border:1px solid var(--line); border-radius:9px; font-size:15px; font-weight:700; }
-.fin-summary{ background:#12307a; color:#fff; border-radius:12px; padding:18px; }
-.fin-summary .row{ display:flex; justify-content:space-between; margin:8px 0; font-size:14px; color:#c9d6f5; }
-.fin-summary .row b{ color:#fff; }
-.fin-summary .big{ font-family:Fredoka,sans-serif; font-size:15px; align-items:baseline; }
-.fin-summary .big b{ font-size:30px; }
-.fin-summary .falta b{ color:var(--accent); }
+
+/* A antiga frente de caixa (.fc-*, .fckey, .fin-pay, .fin-summary) ficava aqui.
+   Foi substituída pelo bloco "PDV / FRENTE DE CAIXA" (.pdv-*) mais abaixo; as
+   regras antigas não pintavam mais nenhum elemento e saíram. */
+
 /* ===== BACKOFFICE (sidebar estilo PedidoOK) ===== */
 .bo{ display:grid; grid-template-columns:230px 1fr; min-height:100vh; }
 .bo-side{ background:#0b1f52; display:flex; flex-direction:column; padding:14px 12px; gap:10px; position:sticky; top:0; height:100vh; overflow-y:auto; z-index:45; }
@@ -230,8 +178,7 @@ tr.clickrow:hover{background:#f2f6ff}
 .bo-brand .on{ background:var(--accent); color:#12307a; border-radius:7px; padding:1px 7px; margin-right:2px; }
 .bo-pdv{ background:var(--accent); color:#12307a; border:none; border-radius:11px; padding:13px 10px; font-weight:800; font-size:13px; white-space:nowrap; cursor:pointer; box-shadow:0 3px 12px rgba(255,207,63,.35); }
 .bo-pdv:hover{ filter:brightness(1.05); }
-.bo-deliv{ background:#1b7a4b; color:#fff; border:none; border-radius:11px; padding:12px; font-weight:800; font-size:14px; cursor:pointer; }
-.bo-deliv:hover{ filter:brightness(1.08); }
+
 .bo-nav{ display:flex; flex-direction:column; gap:6px; margin-top:6px; }
 .bo-nav button{ width:100%;background:transparent; color:#c9d6f5; border:none; border-radius:9px; padding:10px 12px; font-size:13px; font-weight:700; text-align:left; cursor:pointer; transition:.12s; }
 .bo-nav button:hover{ background:#12307a; color:#fff; }
@@ -273,16 +220,10 @@ tr.clickrow:hover{background:#f2f6ff}
 #app.pdv-mode .bo-side, #app.pdv-mode .bo-top{ display:none; }
 #app.pdv-mode .bo-main{ background:#12307a; min-height:0; height:100vh; height:100dvh; overflow:hidden; }
 #app.pdv-mode .bo-content{ background:#12307a; padding:12px 20px; min-height:0; height:100vh; height:100dvh; overflow:hidden; }
-#app.pdv-mode .fc{ height:100%; min-height:0; margin:0; }
-#app.pdv-mode .fc-body{ min-height:0; }
-#app.pdv-mode .fc-main{ min-height:0; }
-#app.pdv-mode .fc-left{ min-height:0; overflow:auto; }
-#app.pdv-mode .fc-items-wrap{ min-height:0; }
-.fc-exit{ background:#7a1f2b !important; border-color:#a33 !important; color:#ffd7d7 !important; font-weight:800; }
-.fc-exit:hover{ background:#93222f !important; }
+
 /* ===== botão entrega piscando + página motoboy ===== */
 @keyframes blinkBY { 0%,49%{ background:#1e63d0; color:#fff; box-shadow:0 0 0 0 rgba(30,99,208,.6);} 50%,100%{ background:var(--accent); color:#12307a; } }
-.bo-deliv.blink{ animation:blinkBY .55s steps(1) infinite; }
+
 #moto{ min-height:100vh; background:var(--bg); color:var(--ink); padding-bottom:30px; }
 .moto-top{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:var(--dark); color:#fff; position:sticky; top:0; z-index:5 }
 .moto-brand{ font-family:Fredoka,sans-serif; font-size:20px; font-weight:700 }
@@ -319,9 +260,6 @@ tr.clickrow:hover{background:#f2f6ff}
 #scanVideo{ width:100%; max-width:520px; border-radius:12px; }
 .scan-frame{ color:#fff; text-align:center; padding:12px; }
 
-.fc-deliv-btn{ width:100%; background:#1b7a4b; color:#fff; border:none; border-radius:10px; padding:13px; font-weight:800; font-size:16px; cursor:pointer; margin-top:14px; display:flex; align-items:center; justify-content:center; gap:8px; }
-.fc-deliv-btn:hover{ filter:brightness(1.08); }
-.fc-deliv-btn.blink{ animation:blinkBY .55s steps(1) infinite; }
 .bo-nav button.blink{ animation:blinkBY .55s steps(1) infinite; border-radius:9px; }
 
 /* =================== RESPONSIVO (mobile + tablet retrato) =================== */
@@ -344,29 +282,20 @@ tr.clickrow:hover{background:#f2f6ff}
   /* frente de caixa */
   #app.pdv-mode{ height:auto; overflow:visible; }
   #app.pdv-mode .bo, #app.pdv-mode .bo-main, #app.pdv-mode .bo-content{ height:auto; min-height:100dvh; overflow:visible; }
-  #app.pdv-mode .fc-left{ overflow:visible; }
+
   #app.pdv-mode .bo-content{ padding:10px; }
-  .fc{ min-height:auto; }
-  .fc-body{ grid-template-columns:1fr; gap:12px; }
-  .fc-consumidor{ font-size:20px; }
-  .fc-foot{ flex-direction:column; align-items:stretch; gap:8px; text-align:right; }
-  .fc-total b{ font-size:28px; }
-  .fc-status{ font-size:11px; }
-  .fc-status-r{ gap:6px; }
+
   /* modais / pagamento */
   .ov{ padding:10px; }
-  .fin-pay input{ width:140px; }
+
 }
 @media (max-width:430px){
-  .fc-keys{ grid-template-columns:1fr; }
-  .fin-pay{ flex-direction:column; align-items:stretch; gap:4px; }
-  .fin-pay input{ width:100%; text-align:left; }
+
   .pay-modes{ grid-template-columns:1fr; }
-  .fc-total b{ font-size:24px; }
+
   .m-foot{ flex-wrap:wrap; }
 }
 
-.fc-online.off{ background:rgba(255,207,63,.16); color:#ffcf3f; border-color:rgba(255,207,63,.5); }
 .row-actions{ display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap; }
 .trend{ display:inline-flex; align-items:center; gap:3px; font-weight:700; font-size:12px; padding:2px 9px; border-radius:999px; white-space:nowrap; }
 .trend.up{ color:#0f9d58; background:rgba(15,157,88,.12); }
@@ -380,7 +309,7 @@ th.c, td.c{ text-align:center; }
 #page-caixa #caixaBody{height:100%}
 /* ================= PDV / FRENTE DE CAIXA ================= */
 body.pdv-mode{background:#0b1f52;overflow:hidden}
-body.pdv-mode .topbar{display:none!important}
+
 body.pdv-mode #app,body.pdv-mode .page{padding:0;margin:0;max-width:none}
 body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 .pdv{--brand:#3b7de0;--p-bg:#12307a;--p-dark:#0b1f52;--p-line:#2a4da8;--p-soft:#1d3f96;
@@ -411,8 +340,7 @@ body.pdv-mode #page-caixa{position:fixed;inset:0;overflow:hidden}
 .pdv-in:focus{border-color:#ffd76a;box-shadow:0 0 0 3px rgba(255,215,106,.35)}
 .pdv-in:disabled{background:#dfe6f6;color:#6b7ba6}
 .pdv-in.num{text-align:right}
-.pdv-logo{flex:none;width:96px;height:96px;border-radius:50%;background:#fff;display:grid;place-items:center;overflow:hidden}
-.pdv-logo img{width:88%;height:auto;object-fit:contain}
+
 .pdv-body{flex:1;display:flex;min-height:0;padding-right:var(--p-pad)}
 .pdv-side{width:var(--p-side);flex:none;display:flex;flex-direction:column;padding:0 var(--p-gap) var(--p-foot-pad-y) var(--p-pad);gap:10px;overflow:auto}
 .pdv-work{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}
@@ -549,7 +477,7 @@ body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filte
 @media(max-width:620px){.pdv-delivery-pay-grid,.pdv-quick-grid{grid-template-columns:1fr}.pdv-quick-grid .wide{grid-column:auto}}
 @media(max-width:1050px){
   .pdv{--p-side:220px;--p-pad:10px;--p-foot-pad-y:7px}
-  .pdv-head{padding:8px var(--p-pad)}.pdv-logo{width:72px;height:72px}
+  .pdv-head{padding:8px var(--p-pad)}
   .pdv-side{padding-inline:var(--p-pad) var(--p-gap)}.pdv-key{padding:7px 5px;font-size:11px}
   .pdv-grid table{min-width:720px}.pdv-foot{grid-template-columns:repeat(3,minmax(0,1fr)) minmax(260px,3fr)}
   .pdv-foot>.cell:not(.total) .pdv-lbl{font-size:13px}.pdv-foot>.cell:not(.total) .pdv-in{font-size:14px;padding-inline:6px}
@@ -559,7 +487,7 @@ body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filte
   body.pdv-mode #page-caixa{position:relative;inset:auto;overflow:visible;min-height:100dvh}
   .pdv{position:relative;inset:auto;min-height:100dvh;height:auto;overflow:visible}
   .pdv-head{align-items:center;position:sticky;top:0;z-index:5;box-shadow:0 2px 10px rgba(0,0,0,.2)}
-  .pdv-logo{display:none}.pdv-cons{font-size:15px;margin-bottom:5px;white-space:normal}
+.pdv-cons{font-size:15px;margin-bottom:5px;white-space:normal}
   .pdv-head .pdv-row{display:grid;grid-template-columns:minmax(130px,.8fr) minmax(150px,1.2fr);gap:6px}
   .pdv-head .pdv-row>div{flex:auto!important}.pdv-lbl{font-size:11px}.pdv-in{font-size:14px;padding:8px}
   .pdv-body{flex-direction:column;min-height:auto;overflow:visible;padding-right:0}
@@ -593,7 +521,7 @@ body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filte
 @media (max-height:760px){
   .pdv{--p-foot-pad-y:5px}
   .pdv-head{padding:6px var(--p-pad) 7px}
-  .pdv-logo{width:72px;height:72px}
+
   .pdv-cons{font-size:16px;margin-bottom:4px}
   .pdv-lbl{margin-bottom:1px;font-size:12px}
   .pdv-in{padding:6px 10px;font-size:15px}
@@ -607,7 +535,7 @@ body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filte
 }
 @media (min-width:821px) and (max-height:620px){
   .pdv{--p-side:clamp(205px,20vw,250px);--p-pad:8px;--p-gap:6px;--p-foot-pad-y:2px}
-  .pdv-head{padding:3px var(--p-pad) 4px}.pdv-cons{font-size:13px;margin-bottom:1px}.pdv-logo{display:none}
+  .pdv-head{padding:3px var(--p-pad) 4px}.pdv-cons{font-size:13px;margin-bottom:1px}
   .pdv-lbl{font-size:9px;margin-bottom:0}.pdv-in{padding:3px 6px;font-size:12px;min-height:26px}
   .pdv-side{gap:3px}.pdv-keys{gap:3px;padding-top:2px}.pdv-key{padding:2px 4px;font-size:9px;min-height:23px}.pdv-key span{font-size:9px}.pdv-key.wide{min-height:23px}
   .pdv-grid table{font-size:11px}.pdv-grid th,.pdv-grid td{padding:4px 6px}
@@ -659,7 +587,7 @@ body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filte
 
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}
-  .bo-deliv.blink,.fc-deliv-btn.blink,.bo-nav button.blink,.pdv-action.attention,.pdv-key.delivery-ready,.pdv-pickup-card.pix-paid{animation:none!important;box-shadow:inset 4px 0 0 var(--accent)!important}
+  .bo-nav button.blink,.pdv-action.attention,.pdv-key.delivery-ready,.pdv-pickup-card.pix-paid{animation:none!important;box-shadow:inset 4px 0 0 var(--accent)!important}
 }
 
 /* Utilitários gerados a partir do shell estático; evitam estilos inline no HTML. */

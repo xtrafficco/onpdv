@@ -64,7 +64,11 @@
       const response = await fetch('partials/onpdv-app.html', { cache: 'no-store' });
       if (!response.ok) throw new Error('Não foi possível carregar a interface do sistema.');
       appHost.innerHTML = await response.text();
-      await Promise.all([loadScript('lib/leaflet/leaflet.js'), loadScript('lib/qrcode.js')]);
+      // O Leaflet (144 KB + 13 KB de CSS) saiu daqui: quem abre mapa é a aba
+      // Entregas, o rastreio do PDV e o pino da loja em Configurações, e os três
+      // chamam ensureLeaflet() na hora. O caixa que só vende não baixa mais nada
+      // disso no login. O qrcode fica: o QR do PIX é gerado no meio da venda.
+      await loadScript('lib/qrcode.js');
       await loadScript('assets/js/onpdv-app.js');
       appHost.removeAttribute('aria-busy');
     })().catch((error) => {
