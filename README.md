@@ -6,7 +6,10 @@ vanilla (sem framework/bundler) sobre um backend **Supabase** (PostgreSQL), com
 integrações de pagamento (**Mercado Pago** — Point + PIX), fiscal (**NFC-e**) e
 mensageria (**WhatsApp** / Web Push).
 
-> Versão atual: **2026.09.09-v56** (ver `version.json`).
+> Versão publicada: **2026.09.09-v56** (ver `version.json`).
+>
+> ⚠️ O repositório está **à frente do que está no ar**: há mudanças commitadas em
+> 13/09/2026 que ainda não foram publicadas no Vercel. Ver *Pendências*.
 
 ---
 
@@ -23,7 +26,8 @@ mensageria (**WhatsApp** / Web Push).
 - [Instalador do caixa (offline)](#instalador-do-caixa-offline)
 - [Desenvolvimento, CI e testes](#desenvolvimento-ci-e-testes)
 - [Versionamento](#versionamento)
-- [Pendências de configuração](#pendências-de-configuração)
+- [Pendências](#pendências)
+- [Histórico de manutenção](#histórico-de-manutenção)
 
 ---
 
@@ -33,10 +37,10 @@ mensageria (**WhatsApp** / Web Push).
 ┌─────────────────────────────────────────────┐        ┌──────────────────────────────┐
 │  Frontends (PWA, JS vanilla, servidos estát.)│        │  Supabase (projeto ONPDV)    │
 │  • index.html   → Caixa/ERP (backoffice+PDV) │        │  • PostgreSQL 17 + RLS       │
-│  • cliente.html → Portal do cliente          │  HTTPS │  • ~283 funções (RPC-first)  │
+│  • cliente.html → Portal do cliente          │  HTTPS │  • 288 funções (RPC-first)   │
 │  • entregador.html → App do entregador       │ ─────▶ │  • Auth (e-mail/senha + 2FA) │
-│  • vitrine.html → Display para o cliente      │  WSS   │  • 19 Edge Functions (Deno)  │
-│  Service Worker (offline) + IndexedDB cache  │        │  • pg_cron (9 jobs)          │
+│  • vitrine.html → Display para o cliente      │  WSS   │  • 17 Edge Functions (Deno)  │
+│  Service Worker (offline) + IndexedDB cache  │        │  • pg_cron (10 jobs)         │
 └─────────────────────────────────────────────┘        └──────────────┬───────────────┘
                                                                        │
                               Integrações externas ────────────────────┤
@@ -64,9 +68,10 @@ mensageria (**WhatsApp** / Web Push).
 ├── vitrine.html               # Display voltado ao cliente
 ├── partials/onpdv-app.html    # Markup do app principal (injetado no index)
 ├── assets/
-│   ├── js/onpdv-app.js         # App principal (~9.900 linhas)
+│   ├── js/onpdv-app.js         # App principal (~9.750 linhas)
 │   ├── js/onpdv-bootstrap.js   # Bootstrap: login + carrega o app
-│   ├── js/onpdv-raiox.js       # Raio-X Financeiro
+│   ├── js/onpdv-raiox.js       # Raio-X Financeiro (sob demanda)
+│   ├── js/onpdv-compras.js     # Módulo Compras (sob demanda)
 │   ├── js/{cliente,entregador,vitrine}.js
 │   └── css/{onpdv,onpdv-raiox}.css
 ├── lib/                       # leaflet (mapa) + qrcode.js (QR local)
@@ -75,16 +80,25 @@ mensageria (**WhatsApp** / Web Push).
 ├── version.json               # Versão publicada (checagem de update dos caixas)
 ├── vercel.json                # Headers HTTP no Vercel (FONTE DA VERDADE de headers)
 ├── _headers                   # (Formato Netlify — IGNORADO no Vercel; só referência)
+├── .gitattributes             # `* -text`: preserva os bytes (o .bat embute um ZIP)
 ├── downloads/                 # Instalador do caixa offline (.bat + .zip)
-├── scripts/build-installer.ps1# Empacota o instalador (PowerShell)
+├── scripts/
+│   ├── check-version.mjs      # Guarda: versão igual nos quatro arquivos
+│   ├── check-frontend.mjs     # Guardas: CSP, zoom, rótulos, SHELL do SW, JSON
+│   └── fix-labels.mjs         # Associa <label> ao campo (for=); idempotente
+├── tests/                     # Testes (node --test) sobre o arquivo publicado
 ├── supabase/
-│   ├── migrations/            # Migrations versionadas (recentes; ver "drift")
-│   ├── functions/             # Cópias de referência de edge functions
-│   └── tests/                 # Testes SQL (transacionais) + guardas de segurança
-├── .github/workflows/ci.yml   # CI (node --check, JSON, guardas de frontend)
-├── MANUTENCAO.md              # Notas de DevOps/manutenção
+│   ├── migrations/            # Migrations versionadas
+│   └── functions/             # Cópias de referência de edge functions
+├── .github/workflows/ci.yml   # CI: sintaxe, guardas e testes
 └── README.md                  # Este arquivo
 ```
+
+> **Faltando neste repositório:** `scripts/build-installer.ps1`, `MANUTENCAO.md` e
+> `supabase/tests/`. Enquanto o primeiro não voltar, **o instalador do caixa não pode
+> ser regerado** — qualquer release nova sai com o `downloads/onpdv-caixa.bat` da v56.
+> Se existirem numa cópia antiga ou em outra máquina, vale trazê-los antes que a
+> memória de como o instalador é montado se perca.
 
 ## Frontends
 
@@ -102,8 +116,9 @@ mensageria (**WhatsApp** / Web Push).
 ## Backend (Supabase)
 
 - **Projeto:** ONPDV (`qkhpvqepgozsaamxmugk`), PostgreSQL 17, região us-east-1.
-- **Escala:** ~78 tabelas (100% com RLS), ~283 funções (~274 `SECURITY DEFINER`,
-  todas com `search_path` fixado), ~208 migrations aplicadas.
+- **Escala:** 81 tabelas (100% com RLS, 33 "trancadas" — sem policy, acesso só via
+  RPC), 288 funções (279 `SECURITY DEFINER`, todas com `search_path` fixado),
+  215 migrations aplicadas.
 - **Chave publicável (anon)** embutida no frontend — pública por design; toda a
   proteção é via RLS/RPC.
 
@@ -122,6 +137,25 @@ mensageria (**WhatsApp** / Web Push).
 | `ops-worker` | ✔ | Automação: cobranças, ciclos, métricas, entrega da outbox |
 | `push-dispatch` | público | Web Push |
 | `admin-user` / `portal-invite` | ✔ | Gestão de usuários / convite de portal |
+
+**Webhooks públicos — como cada um se protege.** `verify_jwt=false` é obrigatório
+(o provedor não manda JWT), então a defesa é interna. O padrão correto está no
+`mp-point-webhook`: sem `MP_WEBHOOK_SECRET` configurado ele **recusa** (401/503) em
+vez de seguir. Os dois PIX aceitam a chamada sem assinatura, mas reconsultam o
+pagamento na API do MP de forma **incondicional** — o corpo é só gatilho, nunca
+fonte da verdade, então forjar a notificação não leva a nada.
+
+> ⚠️ **`fiscal-webhook` é a exceção e precisa ser corrigido antes de ligar a NFC-e.**
+> Ele começa com `let out = payload` e só substitui pelo dado real *se* a reconsulta
+> der certo (`if (r.ok)`). Sem token — ou numa falha transitória de rede — ele chama
+> `erp_fiscal_update` com o corpo da requisição e a service role key. Hoje é inócuo
+> porque `fiscal_documents` está vazia; passa a valer no dia da primeira nota.
+
+Duas edge functions do **PagSeguro/PagBank** (`pagseguro-charge`, `pagseguro-webhook`)
+foram **removidas em 13/09/2026**: nunca foram usadas (0 de 86 pagamentos), não
+apareciam no frontend e o webhook confiava no corpo da requisição. Os fontes ficam em
+`supabase/functions/` — se o PagSeguro voltar ao roadmap, **o webhook não pode voltar
+como estava**.
 
 ### Jobs agendados (pg_cron)
 Diários: marcar vencidos (receber/pagar), assinaturas recorrentes, recompor estoque
@@ -201,32 +235,87 @@ negócio).
 
 ## Segurança
 
-- **RLS em 100% das tabelas**; 30 tabelas "trancadas" (acesso só via RPC).
+- **RLS em 100% das tabelas** (81/81); 33 tabelas "trancadas" (acesso só via RPC).
 - **Isolamento de PII:** `customers`/`receivables`/`payments` restritos a staff
   (`is_staff()`) ou ao próprio cliente (`portal_my_customer_id()`).
-- **Nenhuma função `SECURITY DEFINER` executável por `anon`**.
+- **Nenhuma função `SECURITY DEFINER` executável por `anon`** — verificado em
+  13/09/2026 e agora verdadeiro. Até então `pdv_save_terminal` era a exceção: tinha
+  `GRANT` para `anon` e o `EXECUTE` default para `PUBLIC`. Não era explorável (ela
+  exige `is_admin()` na primeira linha), mas quebrava a invariante.
 - **2FA (TOTP)** para admin (MFA nativo do Supabase) — imposto no banco via
   `is_admin_2fa()` nas superfícies sensíveis (com liberação segura p/ quem ainda não ativou).
 - **Headers:** CSP estrita (via `<meta>`), HSTS, `X-Frame-Options: DENY`, nosniff, COOP,
-  Referrer/Permissions-Policy.
-- **Webhooks** reconsultam o provedor (nunca confiam no corpo) e validam assinatura.
-- **Guardas de regressão:** `supabase/tests/backend_security_guards.sql` (6 invariantes).
+  Referrer/Permissions-Policy. Nenhuma página bloqueia o zoom do usuário.
+- **Webhooks** reconsultam o provedor e usam o corpo apenas como gatilho — com a
+  exceção documentada do `fiscal-webhook`, acima.
+- **Guardas de regressão:** os de frontend estão em `scripts/` (ver *Desenvolvimento,
+  CI e testes*). Os de banco (`supabase/tests/backend_security_guards.sql`) **não estão
+  neste repositório** — vieram junto com `scripts/build-installer.ps1` e
+  `MANUTENCAO.md` na lista do que falta recuperar.
+
+### Um idioma do projeto que confunde na primeira leitura
+
+Várias RPCs têm guardas nesta forma:
+
+```sql
+if not is_admin() and auth.uid() is not null and <venda de outra loja> then
+  raise exception 'Sem permissão';
+end if;
+```
+
+Quando **não há identidade** (`auth.uid()` nulo — service role ou pg_cron), a cadeia
+`AND` inteira vira falsa e a guarda **não barra**. Isso é **deliberado**: é assim que
+os jobs do pg_cron e as edge functions passam. O modelo de confiança é *"service_role
+e cron ignoram a checagem de dono"*.
+
+A consequência prática: **o perímetro de segurança não são as RPCs, é quem segura a
+service role key e o que valida antes de chamar.** Foi exatamente aí que o
+`pagseguro-webhook` falhou — era uma porta aberta na internet segurando essa chave.
+
+`erp_mark_sale_paid` foi endurecida em 13/09/2026 para fechar por omissão (admin →
+qualquer venda; autenticado → só a própria loja; `service_role` → permitido, mas
+declarado; qualquer outro → recusado).
+
+### Observabilidade do caixa
+
+Erros não tratados na tela dos caixas iam só para `window.__onpdvErrors` — 50
+registros em memória que somem quando a aba fecha. Agora `logErr()` também envia a
+**mensagem** do erro para `client_error_log` (tabela trancada), via
+`log_client_error`, com antiflood de 5 minutos por mensagem no servidor.
+
+Sai apenas versão, terminal, papel e o texto do erro: **nada de venda, nada de dado de
+cliente**. Para ler: aba **Auditoria → "Erros do caixa"** (só admin; a RPC
+`erp_client_errors` filtra por `is_admin()` internamente).
 
 ## Deploy
 
-**Site (estático) → Vercel.** Suba o conteúdo da raiz mantendo `assets/`, `partials/`,
-`lib/`, `icons/`, `downloads/`. `vercel.json` define os headers (o `_headers` é formato
-Netlify e é **ignorado** no Vercel). O `version.json` avisa os caixas instalados de
-uma nova versão.
+**Site (estático) → Vercel.** Rode os guardas e os testes antes (ver *Desenvolvimento,
+CI e testes*), depois suba o conteúdo da raiz mantendo `assets/`, `partials/`, `lib/`,
+`icons/`, `downloads/`. `vercel.json` define os headers (o `_headers` é formato Netlify
+e é **ignorado** no Vercel). O `version.json` avisa os caixas instalados de uma nova
+versão.
 
 **Backend → Supabase.** Migrations e edge functions são administradas separadamente
-(CLI/painel). ⚠️ **Drift conhecido:** o schema-núcleo foi criado antes da pasta
-`supabase/migrations/`; rode `supabase db pull` uma vez para versionar o baseline
-(ver `MANUTENCAO.md`).
+(CLI/painel).
+
+> **Correção de um aviso antigo deste README:** não há drift de banco. O histórico
+> remoto está íntegro, com 215 migrations desde `erp_01_schema_and_rls`. O que faltava
+> era a pasta `supabase/` **neste repositório** — `supabase db pull` resolve o lado
+> local (ver *Pendências*).
 
 ## Instalador do caixa (offline)
 
-O caixa roda localmente a partir de um instalador `.bat` que embute o site. Gerar:
+O caixa roda localmente a partir de um instalador `.bat` que embute o site.
+
+> ⚠️ **`scripts/build-installer.ps1` não está neste repositório**, então o instalador
+> **não pode ser regerado** hoje — o `downloads/onpdv-caixa.bat` versionado é o da v56
+> e sairá desatualizado em qualquer release nova. As instruções abaixo ficam para
+> quando o script voltar.
+>
+> O `.gitattributes` marca `*.bat` e `*.zip` como binários de propósito: o instalador
+> embute um ZIP, e normalização de fim de linha corromperia o pacote no checkout.
+
+Gerar:
 
 ```powershell
 # na raiz do repositório
@@ -246,31 +335,104 @@ versão. Ao subir versão nova, atualize `version.json` e o badge em `partials/o
 
 ## Desenvolvimento, CI e testes
 
-- **Sem build/bundler** no fluxo normal: edita e publica. (Node só para `node --check`
-  e o `-Minify` opcional.)
-- **CI** (`.github/workflows/ci.yml`): `node --check` nos JS, validação de JSON/
-  webmanifests e guardas de frontend (portais sem script inline, CSP estrita, HSTS).
-  Passo opcional roda os guardas do banco via `psql` se o secret `SUPABASE_DB_URL` existir.
-- **Testes SQL:** `supabase test db` (ou cole os `.sql` de `supabase/tests/` no SQL Editor).
+**Sem build/bundler** no fluxo normal: edita e publica. Node entra só para os guardas
+e os testes — nada aqui depende de rede, de banco ou de segredo.
+
+Rode tudo antes de publicar:
+
+```bash
+node scripts/check-version.mjs && node scripts/check-frontend.mjs && node --test tests/*.test.mjs
+```
+
+**Guardas** (`scripts/`) — cada um foi testado por mutação: a invariante foi quebrada
+de propósito para confirmar que o guarda reprova. Um guarda que nunca falha não
+protege nada.
+
+| Guarda | Impede |
+|---|---|
+| `check-version.mjs` | Versão divergente entre os quatro arquivos |
+| `check-frontend.mjs` | CSP frouxa, `<script>` inline, JSON inválido |
+| `check-frontend.mjs` | Página bloqueando o zoom (`user-scalable=no`) |
+| `check-frontend.mjs` | `<label for=>` órfão, ou dois rótulos no mesmo campo |
+| `check-frontend.mjs` | Módulo sob demanda fora do `SHELL` do Service Worker |
+
+**Testes** (`tests/`, `node --test`): rodam sobre **o arquivo que vai para a loja**,
+carregado num sandbox `vm` — sem cópia paralela que envelhece. Cobrem a paginação
+(inclusive o teto do servidor menor que a página), a comparação de versões e a
+normalização ASCII do cupom.
+
+> Uma armadilha registrada em `tests/carregar-app.mjs`: dentro do `vm`, o próprio
+> `eval` cai no stub, então qualquer nome "existe" e todo teste passa sem testar nada.
+> Por isso os nomes exportados são explícitos e conferidos contra o stub.
+
+**CI** (`.github/workflows/ci.yml`): sintaxe de todos os JS, os dois guardas e os
+testes, a cada push.
+
+**Testes SQL:** `supabase test db` — depende de `supabase/tests/`, que ainda precisa
+ser recuperado (ver *Pendências*).
 
 ## Versionamento
 
-Três lugares devem bater ao publicar (ex. atual: `2026.09.09-v56`):
-1. `version.json` → `"version"`;
-2. badge em `partials/onpdv-app.html`;
-3. `const CACHE` em `sw.js` (o build carimba a cópia do bundle; no repositório,
-   atualize manualmente para o site web pegar a versão nova).
+**Quatro** lugares devem bater ao publicar (ex. atual: `2026.09.09-v56`) —
+`scripts/check-version.mjs` verifica os quatro e falha quando divergem:
 
-O pacote pronto para o Vercel fica em `publicar-site-v56/` (e no `.zip` de mesmo
-nome), com `PUBLICAR.txt` descrevendo a release.
+1. `version.json` → `"version"` (é a fonte da verdade: o que os caixas consultam);
+2. `const CACHE` em `sw.js`;
+3. `const ONPDV_VERSION` em `assets/js/onpdv-app.js`;
+4. badge do card do instalador em `partials/onpdv-app.html` (preenchido em runtime a
+   partir de `ONPDV_VERSION`; o literal no HTML é fallback e precisa estar certo).
 
-## Pendências de configuração
+> **Por que o guarda existe.** Na v56 o `ONPDV_VERSION` ficou na v50. Como
+> `checkForUpdate()` compara o `version.json` publicado contra essa constante, todo
+> caixa recém-instalado na v56 era avisado de que havia uma "versão nova", baixava o
+> mesmo instalador, e o aviso voltava.
+
+`PUBLICAR.txt` descreve a release publicada. (A pasta `publicar-site-v56/` que ele
+menciona não está neste repositório — o conteúdo da raiz é o que sobe.)
+
+## Pendências
+
+**De configuração (painel):**
 
 - **Supabase → Authentication:** habilitar **2FA por app autenticador (TOTP)** e a
-  **proteção contra senha vazada** (HaveIBeenPwned). Ver `supabase/CHECKLIST-PAINEL.md`.
+  **proteção contra senha vazada** (HaveIBeenPwned). O advisor confirma que a segunda
+  segue desligada.
 - **Cobrança automática por PIX (opcional):** vem desligada; ligue em Configurações e
   confira o provedor de WhatsApp antes.
 
----
+**De engenharia:**
 
-_Documentação de manutenção detalhada em `MANUTENCAO.md`._
+- **Publicar.** As mudanças de 13/09/2026 estão commitadas, **não publicadas** no
+  Vercel. Junto vem uma decisão de release: subir sob a mesma v56 não avisa os caixas
+  instalados, e o instalador em `downloads/` continua com o código antigo.
+- **Recuperar `scripts/build-installer.ps1`, `MANUTENCAO.md` e `supabase/tests/`** (ver *Estrutura do
+  repositório*). Sem o primeiro o instalador não pode ser regerado.
+- **`supabase db pull`** para trazer as 215 migrations do remoto. O banco **não** está
+  com drift — o histórico está íntegro lá, desde `erp_01_schema_and_rls`; quem estava
+  sem histórico era este repositório. O comando pede a senha do banco.
+  ⚠️ Não rode `supabase migration repair --status reverted`: o CLI sugere isso quando a
+  pasta local está vazia, mas o efeito é marcar as migrations como revertidas no
+  histórico **remoto**.
+- **Corrigir o `fiscal-webhook`** antes de ligar a NFC-e (ver *Edge Functions*).
+- **Unificar o CSS dos frontends secundários.** `cliente`, `entregador` e `vitrine`
+  não usam `onpdv.css` — cada um tem seu `<style>` embutido, e nenhum tem
+  `:focus-visible` nem `prefers-reduced-motion`. Não é correção mecânica: exige decidir
+  o que é design compartilhado e o que é específico de cada app.
+
+## Histórico de manutenção
+
+**13/09/2026 — revisão de engenharia.** O repositório entrou em git (antes esta pasta
+era o pacote publicado, sem histórico). Resumo do que mudou:
+
+| Área | Mudança |
+|---|---|
+| Release | `ONPDV_VERSION` alinhado; guarda de versão nos quatro arquivos |
+| Dados | `fetchAllRows()` pagina `customers`, `v_customer_balance` e o fallback de `products` — o teto de linhas do PostgREST trunca em silêncio, sem erro |
+| Segurança | `pdv_save_terminal` fora do alcance de `anon`; `erp_mark_sale_paid` fecha por omissão; edge functions PagSeguro removidas |
+| Observabilidade | `client_error_log` + tela em Auditoria |
+| Arquitetura | Módulo Compras extraído para carregamento sob demanda (−42 KB no login) |
+| Acessibilidade | Zoom restaurado nas 3 telas móveis; 269 rótulos associados aos campos |
+| Qualidade | 19 testes, 5 guardas de frontend e CI de volta |
+
+Detalhe de cada item nas mensagens de commit — elas registram o *porquê*, não só o
+*o quê*.

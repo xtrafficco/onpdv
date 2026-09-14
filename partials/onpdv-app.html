@@ -308,10 +308,10 @@
       <div class="card pad">
         <div class="head"><h2>🧮 Simuladores</h2><span class="grow"></span><button class="btn" id="btnSimRun">Simular</button></div>
         <div class="grid2">
-          <div class="field"><label class="lbl">Compra adicional (R$)</label><input id="simCompra" class="in" value="20000" inputmode="decimal"></div>
-          <div class="field"><label class="lbl">Reduzir estoque em (%)</label><input id="simReducao" class="in" value="20" inputmode="decimal"></div>
-          <div class="field"><label class="lbl">Aumentar prazo fornecedor (dias)</label><input id="simPrazo" class="in" value="15" inputmode="numeric"></div>
-          <div class="field"><label class="lbl">Eliminar grupo</label><select id="simGrupo" class="in"><option value="">Selecione após carregar</option></select></div>
+          <div class="field"><label class="lbl" for="simCompra">Compra adicional (R$)</label><input id="simCompra" class="in" value="20000" inputmode="decimal"></div>
+          <div class="field"><label class="lbl" for="simReducao">Reduzir estoque em (%)</label><input id="simReducao" class="in" value="20" inputmode="decimal"></div>
+          <div class="field"><label class="lbl" for="simPrazo">Aumentar prazo fornecedor (dias)</label><input id="simPrazo" class="in" value="15" inputmode="numeric"></div>
+          <div class="field"><label class="lbl" for="simGrupo">Eliminar grupo</label><select id="simGrupo" class="in"><option value="">Selecione após carregar</option></select></div>
         </div>
       </div>
       <div class="u-static-1" id="simResult"></div>
@@ -365,12 +365,12 @@
       <div class="card pad">
         <div class="head"><h2>🧠 Pedido inteligente</h2><span class="muted u-static-7">Considera calendário de vendas, sazonalidade, prazo real, segurança, lotes, promoções e saldo das outras lojas.</span><span class="grow"></span><button class="btn ghost sm hide" id="btnPurchaseFlow">⚙ Regras de compra</button></div>
         <div class="grid2">
-          <div class="field"><label class="lbl">Fornecedor</label><select id="soSup" class="in"><option value="">Todos</option></select></div>
-          <div class="field"><label class="lbl">Loja</label><select id="soStore" class="in"></select></div>
+          <div class="field"><label class="lbl" for="soSup">Fornecedor</label><select id="soSup" class="in"><option value="">Todos</option></select></div>
+          <div class="field"><label class="lbl" for="soStore">Loja</label><select id="soStore" class="in"></select></div>
         </div>
         <div class="grid2">
-          <div class="field"><label class="lbl">Histórico de vendas (dias)</label><input id="soDias" class="in" value="90" inputmode="numeric"></div>
-          <div class="field"><label class="lbl">Cobertura desejada (dias)</label><input id="soCob" class="in" value="30" inputmode="numeric"></div>
+          <div class="field"><label class="lbl" for="soDias">Histórico de vendas (dias)</label><input id="soDias" class="in" value="90" inputmode="numeric"></div>
+          <div class="field"><label class="lbl" for="soCob">Cobertura desejada (dias)</label><input id="soCob" class="in" value="30" inputmode="numeric"></div>
         </div>
         <div class="u-static-21">
           <button class="btn" id="btnSmartCalc">Calcular pedido</button>
@@ -412,7 +412,7 @@
         <div class="u-static-26">💰</div>
         <h2 class="u-static-27">Caixa fechado</h2>
         <p class="muted u-static-28">Abra o caixa informando o valor inicial (fundo de troco).</p>
-        <div class="field"><label class="lbl">Valor de abertura</label><input id="cashOpenVal" class="in" value="0" inputmode="decimal"></div>
+        <div class="field"><label class="lbl" for="cashOpenVal">Valor de abertura</label><input id="cashOpenVal" class="in" value="0" inputmode="decimal"></div>
         <button class="btn green block" id="btnCashOpen">Abrir caixa</button>
       </div>
       <div id="cashOpen" class="hide">
@@ -429,7 +429,7 @@
           </div>
           <div class="card pad u-static-30">
             <h2 class="u-static-31">Fechar caixa</h2>
-            <div class="field"><label class="lbl">Valor contado na gaveta</label><input id="cashCountVal" class="in" value="0" inputmode="decimal"></div>
+            <div class="field"><label class="lbl" for="cashCountVal">Valor contado na gaveta</label><input id="cashCountVal" class="in" value="0" inputmode="decimal"></div>
             <button class="btn red block" id="btnCashClose">Fechar caixa (conferência)</button>
             <button class="btn ghost block mt-8" id="btnCashShare">📲 Enviar resumo no WhatsApp</button>
           </div>
@@ -624,9 +624,9 @@
     <div id="page-churn" class="page">
       <div class="card pad">
         <div class="head u-static-8"><h2>📉 Clientes em risco de sumir</h2><span class="grow"></span>
-          <label class="pdv-lbl u-static-45">Sem comprar há (dias) ≥</label>
+          <label class="pdv-lbl u-static-45" for="churnDias">Sem comprar há (dias) ≥</label>
           <input id="churnDias" type="number" class="in u-static-14" value="30">
-          <label class="pdv-lbl u-static-45">Atraso ×</label>
+          <label class="pdv-lbl u-static-45" for="churnFator">Atraso ×</label>
           <input id="churnFator" type="number" step="0.1" class="in u-static-46" value="1.5">
           <button class="btn ghost" id="btnChurnLoad">Atualizar</button>
         </div>
@@ -643,7 +643,7 @@
     <div id="page-precos" class="page">
       <div class="card pad">
         <div class="head u-static-8"><h2>🏷️ Preços por margem-alvo</h2><span class="grow"></span>
-          <label class="pdv-lbl u-static-45">Margem-alvo %</label>
+          <label class="pdv-lbl u-static-45" for="pmMargem">Margem-alvo %</label>
           <input id="pmMargem" type="number" step="0.5" class="in u-static-14" value="35">
           <select id="pmCat" class="in u-static-38"><option value="">Todas categorias</option></select>
           <label class="pdv-lbl u-static-45"><input type="checkbox" id="pmOnlyBelow" checked> só abaixo da meta</label>
@@ -688,6 +688,22 @@
         <div class="tbl-wrap"><table>
           <thead><tr><th>Quando</th><th>Usuário</th><th>Ação</th><th>Entidade</th><th>ID</th><th>Loja</th></tr></thead>
           <tbody id="auBody"></tbody>
+        </table></div>
+      </div>
+
+      <div class="card pad" id="cardClientErrors">
+        <div class="head"><h2>⚠️ Erros do caixa</h2><span class="grow"></span>
+          <select id="ceDias" class="in u-static-38" aria-label="Período dos erros">
+            <option value="1">Últimas 24 horas</option>
+            <option value="7" selected>Últimos 7 dias</option>
+            <option value="30">Últimos 30 dias</option>
+          </select>
+          <button class="btn ghost" id="btnCeLoad">Atualizar</button>
+        </div>
+        <div class="pdv-note u-static-10">Falhas que aconteceram na tela dos caixas e que ninguém teria como ver de outro jeito — o operador some do balcão e o erro some com a aba. Registra só a mensagem, a versão e o terminal: nada de venda e nada de dado de cliente. Mensagens repetidas do mesmo operador são agrupadas.</div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th>Último</th><th>Loja</th><th>Terminal</th><th>Papel</th><th>Versão</th><th>Tipo</th><th>Mensagem</th><th class="r">Vezes</th></tr></thead>
+          <tbody id="ceBody"></tbody>
         </table></div>
       </div>
     </div>
@@ -797,8 +813,8 @@
       <div class="card pad u-static-15">
         <div class="head"><h2>🔄 Nova transferência (Modelo → loja)</h2></div>
         <div class="grid2">
-          <div class="field"><label class="lbl">Loja de destino</label><select id="trDest" class="in"></select></div>
-          <div class="field"><label class="lbl">Buscar produto</label>
+          <div class="field"><label class="lbl" for="trDest">Loja de destino</label><select id="trDest" class="in"></select></div>
+          <div class="field"><label class="lbl" for="trSearch">Buscar produto</label>
             <div class="u-static-50"><input id="trSearch" class="in" placeholder="nome / SKU…" autocomplete="off"><div id="trRes" class="search-res hide"></div></div>
           </div>
         </div>
@@ -878,7 +894,7 @@
         <div class="head u-static-24"><div><h2>🚨 Prevenção de perdas e fraudes</h2><p class="muted">Descontos fora do padrão, cancelamentos, devoluções, ajustes de estoque e diferenças de caixa.</p></div><span class="grow"></span>
           <input id="lossIni" class="in u-static-19" type="date"><input id="lossFim" class="in u-static-19" type="date">
           <select id="lossStore" class="in u-static-48"></select>
-          <div class="field u-static-54"><label class="lbl">Alerta desconto ≥ %</label><input id="lossDiscount" class="in" value="15" inputmode="decimal"></div>
+          <div class="field u-static-54"><label class="lbl" for="lossDiscount">Alerta desconto ≥ %</label><input id="lossDiscount" class="in" value="15" inputmode="decimal"></div>
           <button class="btn" id="btnLossLoad">Analisar</button></div>
         <div class="stats" id="lossStats"></div>
       </div>
@@ -983,7 +999,7 @@
       </div>
       <div class="card pad u-static-15" id="cardPdvInstaller">
         <div class="head"><h2>🛒 Instalador da Frente de Caixa</h2><span class="grow"></span>
-          <span class="chip ok">2026.09.08 · v55</span>
+          <span class="chip ok" id="pdvInstallerVersion">2026.09.09 · v56</span>
           <a class="btn" href="downloads/onpdv-caixa.bat" download="onpdv-caixa.bat">⬇ Baixar ONPDV Caixa</a></div>
         <p class="muted u-static-56">
           Baixe este instalador em cada computador de venda. Ele instala o componente
@@ -1001,12 +1017,12 @@
         <div class="head"><h2>🧾 Dados da empresa (recibo)</h2><span class="grow"></span>
           <button class="btn" id="btnSaveCompany">Salvar</button></div>
         <div class="grid2">
-          <div class="field"><label class="lbl">Nome / Razão social</label><input id="coNome" class="in"></div>
-          <div class="field"><label class="lbl">CNPJ</label><input id="coCnpj" class="in"></div>
-          <div class="field"><label class="lbl">Telefone</label><input id="coFone" class="in"></div>
-          <div class="field"><label class="lbl">Endereço</label><input id="coEnd" class="in"></div>
+          <div class="field"><label class="lbl" for="coNome">Nome / Razão social</label><input id="coNome" class="in"></div>
+          <div class="field"><label class="lbl" for="coCnpj">CNPJ</label><input id="coCnpj" class="in"></div>
+          <div class="field"><label class="lbl" for="coFone">Telefone</label><input id="coFone" class="in"></div>
+          <div class="field"><label class="lbl" for="coEnd">Endereço</label><input id="coEnd" class="in"></div>
         </div>
-        <div class="field"><label class="lbl">Rodapé do recibo</label><input id="coRodape" class="in"></div>
+        <div class="field"><label class="lbl" for="coRodape">Rodapé do recibo</label><input id="coRodape" class="in"></div>
       </div>
       <div class="card pad u-static-15" id="cardCollectionsPix">
         <div class="head"><h2>🔔 Cobrança automática por PIX (crediário)</h2><span class="grow"></span>
@@ -1029,14 +1045,14 @@
           <button class="btn" id="btnSaveScale">Salvar</button></div>
         <p class="muted u-static-55">Quando o produto é vendido por peso, a balança imprime uma etiqueta de código de barras (EAN-13) que já traz o <b>peso</b> ou o <b>preço</b> embutido. Configure abaixo conforme a sua balança (Toledo, Filizola, etc.). O código do produto na etiqueta deve bater com o <b>código de barras (EAN)</b> cadastrado no produto.</p>
         <div class="grid2">
-          <div class="field"><label class="lbl">Ativar leitura de etiqueta de balança</label>
+          <div class="field"><label class="lbl" for="scAtiva">Ativar leitura de etiqueta de balança</label>
             <select id="scAtiva" class="in"><option value="0">Desativada</option><option value="1">Ativada</option></select></div>
-          <div class="field"><label class="lbl">O que vem embutido na etiqueta</label>
+          <div class="field"><label class="lbl" for="scModo">O que vem embutido na etiqueta</label>
             <select id="scModo" class="in"><option value="peso">Peso (kg) — o PDV multiplica pelo preço/kg</option><option value="preco">Preço (R$) — a balança já calculou o valor</option></select></div>
-          <div class="field"><label class="lbl">Prefixo da etiqueta (1º dígito)</label><input id="scPrefixo" class="in" value="2" inputmode="numeric" maxlength="2"></div>
-          <div class="field"><label class="lbl">Dígitos do código do produto</label><input id="scCodLen" class="in" value="6" inputmode="numeric"></div>
-          <div class="field"><label class="lbl">Dígitos do valor/peso</label><input id="scValLen" class="in" value="5" inputmode="numeric"></div>
-          <div class="field"><label class="lbl">Casas decimais do valor/peso</label><input id="scValDec" class="in" value="3" inputmode="numeric"></div>
+          <div class="field"><label class="lbl" for="scPrefixo">Prefixo da etiqueta (1º dígito)</label><input id="scPrefixo" class="in" value="2" inputmode="numeric" maxlength="2"></div>
+          <div class="field"><label class="lbl" for="scCodLen">Dígitos do código do produto</label><input id="scCodLen" class="in" value="6" inputmode="numeric"></div>
+          <div class="field"><label class="lbl" for="scValLen">Dígitos do valor/peso</label><input id="scValLen" class="in" value="5" inputmode="numeric"></div>
+          <div class="field"><label class="lbl" for="scValDec">Casas decimais do valor/peso</label><input id="scValDec" class="in" value="3" inputmode="numeric"></div>
         </div>
         <p class="muted u-static-57">Exemplo: prefixo <b>2</b>, código <b>6</b> dígitos, valor <b>5</b> dígitos, <b>3</b> casas → <code>2</code>+<code>001234</code>+<code>01500</code>+dígito verificador = produto 001234 com 1,500 kg (modo peso) ou R$ 15,00 (modo preço, 2 casas). Ajuste com uma etiqueta real da sua balança.</p>
       </div>
@@ -1046,9 +1062,9 @@
           <button class="btn" id="btnSaveMp">Salvar</button></div>
         <p class="muted u-static-55">Device ID <b>global</b> usado quando a maquininha cadastrada não tem um Device ID próprio. Conecte a maquininha <b>Point Smart/Pro</b> à sua conta do Mercado Pago para que o PDV envie a cobrança direto para o visor dela. O <b>Access Token</b> fica guardado no servidor (secret <code>MP_ACCESS_TOKEN</code>), nunca no navegador — aqui você informa só o número de série (Device ID) do aparelho.</p>
         <div class="grid2">
-          <div class="field"><label class="lbl">Ativar cobrança na Point pela API</label>
+          <div class="field"><label class="lbl" for="mpAtiva">Ativar cobrança na Point pela API</label>
             <select id="mpAtiva" class="in"><option value="0">Desativada</option><option value="1">Ativada</option></select></div>
-          <div class="field"><label class="lbl">Device ID (série da maquininha)</label><input id="mpDevice" class="in" placeholder="ex.: PAX_A910__SMARTPOS1234567890"></div>
+          <div class="field"><label class="lbl" for="mpDevice">Device ID (série da maquininha)</label><input id="mpDevice" class="in" placeholder="ex.: PAX_A910__SMARTPOS1234567890"></div>
         </div>
         <p class="muted u-static-57">Para pegar o Device ID: na maquininha, entre em <b>Configurações → Ponto de venda / Modo de operação</b> e ative o modo <b>PDV/Integrado</b>. O código aparece no app do vendedor do Mercado Pago. O Access Token de produção é definido no servidor com <code>supabase secrets set MP_ACCESS_TOKEN=...</code>.</p>
       </div>
@@ -1061,9 +1077,9 @@
           Programa de cashback ativo</label>
         <p class="muted u-static-55">Quando ativo, cada venda com <b>cliente identificado</b> credita cashback sobre o valor da compra. O saldo vira desconto no caixa. Desligado, nada muda nas vendas. <b>Vendas no crediário não geram cashback.</b></p>
         <div class="grid2">
-          <div class="field"><label class="lbl">% de cashback por compra</label><input id="cfgCbPercent" class="in" inputmode="decimal" placeholder="ex.: 3"></div>
-          <div class="field"><label class="lbl">Validade do cashback (dias)</label><input id="cfgCbVal" class="in" inputmode="numeric" placeholder="ex.: 90"></div>
-          <div class="field"><label class="lbl">Compra mínima p/ creditar (R$)</label><input id="cfgCbMin" class="in" inputmode="decimal" placeholder="0,00"></div>
+          <div class="field"><label class="lbl" for="cfgCbPercent">% de cashback por compra</label><input id="cfgCbPercent" class="in" inputmode="decimal" placeholder="ex.: 3"></div>
+          <div class="field"><label class="lbl" for="cfgCbVal">Validade do cashback (dias)</label><input id="cfgCbVal" class="in" inputmode="numeric" placeholder="ex.: 90"></div>
+          <div class="field"><label class="lbl" for="cfgCbMin">Compra mínima p/ creditar (R$)</label><input id="cfgCbMin" class="in" inputmode="decimal" placeholder="0,00"></div>
         </div>
         <p class="muted u-static-60">Esta é a <b>% base</b>, válida para todos. Campanhas segmentadas (aniversariantes, inativos, dobro etc.) continuam em <b>Clientes → 🎁 Cashback</b>.</p>
       </div>
@@ -1104,17 +1120,17 @@
       <div class="card pad">
         <div class="head"><h2>🧾 Dados do pedido</h2></div>
         <div class="grid2">
-          <div class="field"><label class="lbl">Origem</label>
+          <div class="field"><label class="lbl" for="cmpPoList">Origem</label>
             <select id="cmpPoList" class="in"><option value="geral">Lista geral</option><option value="iconha">Lista Iconha</option><option value="reta">Lista Reta</option></select></div>
-          <div class="field"><label class="lbl">Fornecedor</label><select id="cmpPoSup" class="in"><option value="">Selecione</option></select></div>
-          <div class="field"><label class="lbl">Loja</label><select id="cmpPoStore" class="in"></select></div>
-          <div class="field"><label class="lbl">Solicitante</label><input id="cmpPoBuyer" class="in"></div>
-          <div class="field"><label class="lbl">Prioridade</label><select id="cmpPoPriority" class="in"><option value="baixa">Baixa</option><option value="normal" selected>Normal</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></div>
-          <div class="field"><label class="lbl">Entrega desejada</label><input id="cmpPoDelivery" class="in" type="date"></div>
-          <div class="field"><label class="lbl">Quantidade de boletos</label><input id="cmpPoInstallments" class="in" type="number" min="1" value="1"></div>
-          <div class="field"><label class="lbl">Intervalo dos boletos (dias)</label><input id="cmpPoInterval" class="in" type="number" min="1" value="30"></div>
+          <div class="field"><label class="lbl" for="cmpPoSup">Fornecedor</label><select id="cmpPoSup" class="in"><option value="">Selecione</option></select></div>
+          <div class="field"><label class="lbl" for="cmpPoStore">Loja</label><select id="cmpPoStore" class="in"></select></div>
+          <div class="field"><label class="lbl" for="cmpPoBuyer">Solicitante</label><input id="cmpPoBuyer" class="in"></div>
+          <div class="field"><label class="lbl" for="cmpPoPriority">Prioridade</label><select id="cmpPoPriority" class="in"><option value="baixa">Baixa</option><option value="normal" selected>Normal</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></div>
+          <div class="field"><label class="lbl" for="cmpPoDelivery">Entrega desejada</label><input id="cmpPoDelivery" class="in" type="date"></div>
+          <div class="field"><label class="lbl" for="cmpPoInstallments">Quantidade de boletos</label><input id="cmpPoInstallments" class="in" type="number" min="1" value="1"></div>
+          <div class="field"><label class="lbl" for="cmpPoInterval">Intervalo dos boletos (dias)</label><input id="cmpPoInterval" class="in" type="number" min="1" value="30"></div>
         </div>
-        <div class="field" style="margin-top:12px"><label class="lbl">Observações</label><textarea id="cmpPoNotes" class="in" rows="2"></textarea></div>
+        <div class="field" style="margin-top:12px"><label class="lbl" for="cmpPoNotes">Observações</label><textarea id="cmpPoNotes" class="in" rows="2"></textarea></div>
         <div class="stats" style="margin-top:14px">
           <div class="stat"><div class="k">Itens selecionados</div><div class="v" id="cmpPoItemsStat">0</div></div>
           <div class="stat"><div class="k">Total do pedido</div><div class="v" id="cmpPoTotalStat">R$ 0,00</div></div>
@@ -1186,12 +1202,12 @@
     <div id="page-cmpCotacoes" class="page">
       <div class="card pad"><div class="head"><h2>💬 Registrar cotação</h2></div>
         <div class="grid2">
-          <div class="field"><label class="lbl">Produto</label><select id="cmpQuoteProduct" class="in"></select></div>
-          <div class="field"><label class="lbl">Fornecedor</label><select id="cmpQuoteSupplier" class="in"></select></div>
-          <div class="field"><label class="lbl">Preço cotado</label><input id="cmpQuotePrice" class="in" inputmode="decimal" placeholder="0,00"></div>
-          <div class="field"><label class="lbl">Prazo (dias)</label><input id="cmpQuoteDays" class="in" type="number" min="0" value="0"></div>
+          <div class="field"><label class="lbl" for="cmpQuoteProduct">Produto</label><select id="cmpQuoteProduct" class="in"></select></div>
+          <div class="field"><label class="lbl" for="cmpQuoteSupplier">Fornecedor</label><select id="cmpQuoteSupplier" class="in"></select></div>
+          <div class="field"><label class="lbl" for="cmpQuotePrice">Preço cotado</label><input id="cmpQuotePrice" class="in" inputmode="decimal" placeholder="0,00"></div>
+          <div class="field"><label class="lbl" for="cmpQuoteDays">Prazo (dias)</label><input id="cmpQuoteDays" class="in" type="number" min="0" value="0"></div>
         </div>
-        <div class="field" style="margin-top:12px"><label class="lbl">Observações</label><input id="cmpQuoteNotes" class="in"></div>
+        <div class="field" style="margin-top:12px"><label class="lbl" for="cmpQuoteNotes">Observações</label><input id="cmpQuoteNotes" class="in"></div>
         <button class="btn green" data-onclick="cmpQuoteSave()" style="margin-top:12px">Salvar cotação</button>
       </div>
       <div class="card pad"><div class="head"><h2>Comparativo de preços</h2><span class="grow"></span><button class="btn ghost sm" data-onclick="cmpRenderCotacoes()">Atualizar</button></div>

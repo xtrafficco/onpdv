@@ -97,7 +97,9 @@ function renderState(st){
   if(cu && cu.name){
     identified=true; clearTimeout(window._cpfTo);
     cust.classList.remove('anon');
-    $('#custName').textContent='Olá, '+esc(cu.name)+'! 🎉';
+    // textContent já escapa: passar por esc() aqui faria "Pai & Filho" aparecer
+    // na tela do cliente como "Pai &amp; Filho".
+    $('#custName').textContent='Olá, '+(cu.name||'')+'! 🎉';
     $('#custSub').textContent='Que bom te ver por aqui 🐾';
     $('#custCb').style.display=''; $('#cbVal').textContent=BRL(cu.cashback||0);
     // recolhe o teclado, oferece trocar

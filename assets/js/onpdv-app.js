@@ -153,7 +153,40 @@ function logErr(kind, detail){
     window.__onpdvErrors.push(rec);
     if(window.__onpdvErrors.length>50) window.__onpdvErrors.shift();
     console.error('[ONPDV]', kind, rec.msg, detail);
+    _enviarErro(kind, rec.msg);
   }catch(_){}
+}
+// Manda a MENSAGEM do erro para o servidor (RPC log_client_error, tabela trancada).
+// O buffer acima continua existindo, mas ele some quando a aba fecha — e um caixa
+// que falha às 19h de sábado só virava informação se alguém estivesse na frente da
+// máquina. Sai daqui apenas: versão, terminal, papel e o texto do erro. Nada de
+// venda, nada de dado de cliente.
+//
+// Blindagens, porque isto roda DENTRO do handler de erro global: nunca lança, nunca
+// reentra e a rejeição da chamada é engolida — se ela virasse 'unhandledrejection',
+// cairia de volta aqui e viraria um laço de erros.
+let _errEnviando=false;
+const _errJaEnviados=new Set();
+function _enviarErro(kind, msg){
+  try{
+    if(_errEnviando || !navigator.onLine || !sb) return;
+    const chave=kind+'|'+msg;
+    if(_errJaEnviados.has(chave)) return;       // uma vez por mensagem, por sessão
+    if(_errJaEnviados.size>=20) return;         // teto por sessão
+    _errJaEnviados.add(chave);
+    let versao=null, terminal=null;
+    // ONPDV_VERSION é declarado bem mais abaixo: se o erro acontecer antes disso,
+    // lê-lo lança ReferenceError (nem typeof salva num const em TDZ).
+    try{ versao=ONPDV_VERSION; }catch(_){}
+    try{ terminal=(typeof pdvTerm==='function')?pdvTerm():null; }catch(_){}
+    _errEnviando=true;
+    try{
+      sb.rpc('log_client_error', {
+        p_kind:kind, p_message:msg, p_versao:versao, p_terminal:terminal,
+        p_user_agent:String(navigator.userAgent||'').slice(0,200)
+      }).then(null, ()=>{});
+    } finally { _errEnviando=false; }
+  }catch(_){ _errEnviando=false; }
 }
 window.addEventListener('error', ev=> logErr('error', ev));
 window.addEventListener('unhandledrejection', ev=> logErr('promise', ev));
@@ -257,8 +290,8 @@ $('#btnLogout').onclick = async ()=>{ await sb.auth.signOut({scope:'local'}); lo
 window.openMyPassword = ()=>{
   modal('<div class="m-head"><h3>Trocar a minha senha</h3><button data-modal-close>✕</button></div>'
     +'<div class="m-body">'
-      +'<div class="field"><label class="lbl">Nova senha (mín. 6)</label><input id="mpNew" class="in" type="password" autocomplete="new-password"></div>'
-      +'<div class="field"><label class="lbl">Repita a nova senha</label><input id="mpNew2" class="in" type="password" autocomplete="new-password"></div>'
+      +'<div class="field"><label class="lbl" for="mpNew">Nova senha (mín. 6)</label><input id="mpNew" class="in" type="password" autocomplete="new-password"></div>'
+      +'<div class="field"><label class="lbl" for="mpNew2">Repita a nova senha</label><input id="mpNew2" class="in" type="password" autocomplete="new-password"></div>'
     +'</div>'
     +'<div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button>'
       +'<button class="btn" id="mpGo" data-onclick="openMyPasswordGo()">Salvar</button></div>');
@@ -607,7 +640,7 @@ function openBoPage(pg){
   if(pg==='operacoes') loadOpsCenter();
   if(pg==='prevencao') loadLossPrevention();
   if(pg==='config'){ renderPdvTerminalsConfig(); renderTerminals(); renderStores(); renderUsers(); loadCashbackConfigCard(); renderPushCard(); renderCollectionsPixCard(); }
-  if(pg.startsWith('cmp') && window.CMP_PAGES && window.CMP_PAGES[pg]) window.CMP_PAGES[pg]();
+  if(pg.startsWith('cmp')) openCompras(pg);
 }
 /* Raio-X Financeiro: motor pesado (~120 KB) carregado só quando a aba abre.
    Depois de carregado, ONPDV_RAIOX.open() cuida da busca e da renderização. */
@@ -663,15 +696,15 @@ async function loadProducts(){
       const r=await sb.rpc('erp_products',{ p_store: CURRENT_STORE }); if(r.error) throw r.error;
       return r.data||[];
     }
-    const r=await sb.from('products').select('*').eq('ativo',true).order('nome'); if(r.error) throw r.error;
-    return (r.data||[]).map(p=>({ ...p, estoque:0 }));
+    // Só chega aqui se não houver nenhuma loja ativa (com loja, o caminho é a RPC acima).
+    const rows = await fetchAllRows(()=> sb.from('products').select('*').eq('ativo',true).order('nome').order('id'));
+    return rows.map(p=>({ ...p, estoque:0 }));
   });
   PRODUCTS = data||[];
 }
 async function loadCustomers(){
   const { data } = await refetch('customers', async ()=>{
-    const r = await sb.from('customers').select('*').eq('ativo',true).order('nome'); if(r.error) throw r.error;
-    return r.data||[];
+    return await fetchAllRows(()=> sb.from('customers').select('*').eq('ativo',true).order('nome').order('id'));
   });
   CUSTOMERS = data||[];
 }
@@ -877,6 +910,33 @@ async function refCachePut(k,v,mirror){ await OFFLINE_READY;
   if(!_idb) return false;
   return new Promise(res=>{ try{ const t=_idb.transaction(REF_STORE,'readwrite'); t.objectStore(REF_STORE).put({k,v,at:Date.now()});
     t.oncomplete=()=>res(true); t.onerror=()=>res(false); }catch(e){ res(false); } }); }
+// ---- paginação: proteção contra o corte silencioso do PostgREST ----
+// O projeto tem um teto de linhas por resposta ("Max rows", 1.000 por padrão no
+// painel). Ao ultrapassá-lo a consulta NÃO dá erro: volta 200 OK com menos linhas
+// do que existem. Quem fica de fora simplesmente some da tela, e o relato chega
+// como "esse cliente sumiu do caixa" — longe da causa.
+//
+// Duas sutilezas que o código precisa respeitar:
+//  1. Avançamos pelo tamanho da página RECEBIDA, nunca por um passo fixo. Se o teto
+//     do servidor for menor que PAGE_SIZE, um passo fixo pularia linhas caladamente.
+//  2. Quem chama precisa ordenar por algo ÚNICO (o desempate por `id`). Com ordem
+//     ambígua, linhas empatadas trocam de página entre as consultas e acabam
+//     duplicadas ou perdidas.
+const PAGE_SIZE = 500;
+const PAGE_MAX  = 200;   // trava: 100 mil linhas, para um bug nunca virar laço infinito
+async function fetchAllRows(novaConsulta){
+  const linhas = [];
+  for(let i = 0; i < PAGE_MAX; i++){
+    const r = await novaConsulta().range(linhas.length, linhas.length + PAGE_SIZE - 1);
+    if(r.error) throw r.error;
+    const lote = r.data || [];
+    if(!lote.length) return linhas;
+    for(const x of lote) linhas.push(x);
+  }
+  logErr('paginacao', new Error('fetchAllRows parou na trava de seguranca com '+linhas.length+' linhas'));
+  return linhas;
+}
+
 // Executa o carregador ONLINE; grava no cache em caso de sucesso; se cair a REDE, restaura do
 // cache; qualquer outro erro (permissão, dado inválido) é propagado como antes.
 async function refetch(key, fetcher, mirror){
@@ -956,8 +1016,17 @@ window.pdvOfflineCacheState = function(){
 // ============ CHECAGEM DE NOVA VERSÃO (caixa instalado) ============
 // O caixa roda dos arquivos locais; para saber se saiu versão nova, consulta o version.json
 // do site publicado e avisa (com link para baixar o instalador). Não aplica sozinho.
-const ONPDV_VERSION='2026.09.01-v50';
+const ONPDV_VERSION='2026.09.09-v56';
 const ONPDV_SITE='https://onpdv.vercel.app';
+// O badge do card "Instalador da Frente de Caixa" mostra a mesma versão. Preenchemos
+// por aqui para não existir um segundo lugar no código que alguém precise lembrar de
+// atualizar — era exatamente essa divergência que fazia o caixa recém-instalado avisar
+// que havia uma versão nova (ONPDV_VERSION ficou na v50 enquanto o site já era v56).
+// O HTML traz o valor certo como fallback, então a tela não fica vazia se isto falhar.
+(function(){ try{
+  const el=document.getElementById('pdvInstallerVersion');
+  if(el) el.textContent=ONPDV_VERSION.replace(/-(v\d+)$/, ' · $1');
+}catch(_){} })();
 function _verKey(v){ v=String(v||''); const d=(v.match(/(\d{4})\.(\d{2})\.(\d{2})/)||[]).slice(1).join(''); const n=(v.match(/v(\d+)/i)||[])[1]||'0'; return [ +d||0, +n||0 ]; }
 function _updateIsNewer(a,b){ const ka=_verKey(a), kb=_verKey(b); return ka[0]>kb[0] || (ka[0]===kb[0] && ka[1]>kb[1]); }
 async function checkForUpdate(){
@@ -1422,7 +1491,7 @@ function pdvClubModal(){
     '<div class="pdv-sum"><div class="l"><span>Cliente</span><b>'+esc(PDV.cust.name||'')+'</b></div>'
       +'<div class="l cb"><span>Economia estimada hoje</span><b>'+BRL(save)+'</b></div></div>'
     +'<div class="pdv-note" style="margin-bottom:10px">A recompra será criada com os itens atuais. O cliente poderá editar ou pausar no app.</div>'
-    +'<label class="pdv-lbl">Repetir a cada</label><select class="pdv-in" id="pdvClubDays"><option value="30">30 dias</option><option value="45">45 dias</option><option value="60">60 dias</option><option value="15">15 dias</option></select>'
+    +'<label class="pdv-lbl" for="pdvClubDays">Repetir a cada</label><select class="pdv-in" id="pdvClubDays"><option value="30">30 dias</option><option value="45">45 dias</option><option value="60">60 dias</option><option value="15">15 dias</option></select>'
     +'<div class="pdv-btns"><button class="pdv-btn" id="pdvClubGo" data-onclick="pdvCreateClub()">Ativar Clube</button><button class="pdv-btn ghost" data-pdv-close>Cancelar</button></div>');
 }
 async function pdvCreateClub(){
@@ -1643,9 +1712,9 @@ function renderCaixa(){
         +(cust?' <span style="font-size:13px;font-weight:700;opacity:.9">· cashback '+BRL(cust.cashback||0)
           +(cust.member?' · 🎫 assinante':'')+'</span>':'')+'</div>'
       +'<div class="pdv-row">'
-        +'<div class="pdv-code-col"><label class="pdv-lbl">Código ou Código de Barra</label>'
+        +'<div class="pdv-code-col"><label class="pdv-lbl" for="pdvCode">Código ou Código de Barra</label>'
           +'<input class="pdv-in" id="pdvCode" autocomplete="off" '+(open?'':'disabled')+'></div>'
-        +'<div style="flex:1"><label class="pdv-lbl">Descrição</label>'
+        +'<div style="flex:1"><label class="pdv-lbl" for="pdvDesc">Descrição</label>'
           +'<input class="pdv-in" id="pdvDesc" value="'+esc(PDV.sel>=0&&PDV.items[PDV.sel]?PDV.items[PDV.sel].name:'')+'" disabled></div>'
       +'</div>'
     +'</div>'
@@ -1653,11 +1722,11 @@ function renderCaixa(){
 
   +'<div class="pdv-body">'
     +'<div class="pdv-side">'
-      +'<div class="fld"><label class="pdv-lbl">Quantidade/Kg</label>'
+      +'<div class="fld"><label class="pdv-lbl" for="pdvQty">Quantidade/Kg</label>'
         +'<input class="pdv-in num" id="pdvQty" value="1" '+(open?'':'disabled')+'></div>'
-      +'<div class="fld"><label class="pdv-lbl">Preço unitário/Kg R$</label>'
+      +'<div class="fld"><label class="pdv-lbl" for="pdvUnitPrice">Preço unitário/Kg R$</label>'
         +'<input class="pdv-in num" id="pdvUnitPrice" value="0,00" disabled></div>'
-      +'<div class="fld"><label class="pdv-lbl">Preço total R$</label>'
+      +'<div class="fld"><label class="pdv-lbl" for="pdvLineTotal">Preço total R$</label>'
         +'<input class="pdv-in num" id="pdvLineTotal" value="0,00" '+(open?'':'disabled')
         +' title="Para itens por peso: digite o valor em R$ e pressione Enter para calcular o peso"></div>'
       +pdvOpportunitiesHtml()
@@ -1995,7 +2064,7 @@ function pdvCloseModal(restore=true){
 /* ---------- F2 · buscar produto ---------- */
 function pdvSearchModal(q){
   pdvModal('Selecione Produto',
-    '<label class="pdv-lbl">Buscar Produto</label>'
+    '<label class="pdv-lbl" for="pdvSq">Buscar Produto</label>'
     +'<div style="display:flex;gap:12px;align-items:center;margin-bottom:12px">'
       +'<input class="pdv-in" id="pdvSq" value="'+esc(q||'')+'" data-oninput="pdvSearchRender()" autocomplete="off" style="flex:1">'
       +'<label style="display:flex;gap:7px;align-items:center;white-space:nowrap;font-weight:700">'
@@ -2034,7 +2103,7 @@ function pdvPickProduct(pid,vid){
 /* ---------- F3 · consultar preço ---------- */
 function pdvPriceModal(){
   pdvModal('Consultar Preço',
-    '<label class="pdv-lbl">Código de barras ou nome</label>'
+    '<label class="pdv-lbl" for="pdvPq">Código de barras ou nome</label>'
     +'<input class="pdv-in" id="pdvPq" data-oninput="pdvPriceRender()" autocomplete="off">'
     +'<div class="pdv-list" id="pdvPqList" style="margin-top:12px"></div>',true);
   pdvPriceRender();
@@ -2059,9 +2128,9 @@ function pdvItemDiscount(){
   pdvModal('Desconto no Item',
     '<div class="pdv-sum"><div class="l"><span>'+esc(it.name)+'</span><b>'+BRL(line)+'</b></div></div>'
     +'<div class="pdv-row" style="gap:12px">'
-      +'<div style="flex:1"><label class="pdv-lbl">Desconto R$</label>'
+      +'<div style="flex:1"><label class="pdv-lbl" for="pdvIdR">Desconto R$</label>'
         +'<input class="pdv-in num" id="pdvIdR" value="'+(+it.disc||0).toFixed(2).replace('.',',')+'"></div>'
-      +'<div style="flex:1"><label class="pdv-lbl">ou desconto %</label>'
+      +'<div style="flex:1"><label class="pdv-lbl" for="pdvIdP">ou desconto %</label>'
         +'<input class="pdv-in num" id="pdvIdP" value="0,00"></div>'
     +'</div>'
     +'<div class="pdv-btns"><button class="pdv-btn" data-onclick="pdvApplyItemDiscount('+i+','+line+')">Aplicar</button>'
@@ -2092,7 +2161,7 @@ function pdvCustomerModal(){
   const c=PDV.cust;
   pdvModal('Informar Consumidor',
     '<div class="pdv-row" style="gap:12px">'
-      +'<div style="flex:1"><label class="pdv-lbl">CPF, telefone, e-mail ou nome</label>'
+      +'<div style="flex:1"><label class="pdv-lbl" for="pdvCq">CPF, telefone, e-mail ou nome</label>'
         +'<input class="pdv-in" id="pdvCq" autocomplete="off" placeholder="000.000.000-00"></div>'
       +'<div style="flex:0 0 190px;display:flex;align-items:flex-end">'
         +'<button class="pdv-btn" style="width:100%" data-onclick="pdvLookupCustomer()">Buscar (ENTER)</button></div>'
@@ -2120,8 +2189,8 @@ function pdvCustomerModal(){
 function pdvExpressCustomerModal(){
   pdvModal('Cadastro expresso',
     '<div class="pdv-note" style="margin-bottom:12px">Crie o cadastro sem senha. O cashback desta venda já ficará ligado ao cliente.</div>'
-    +'<label class="pdv-lbl">Nome *</label><input class="pdv-in" id="pdvExName" autocomplete="name" placeholder="Nome do cliente">'
-    +'<label class="pdv-lbl" style="margin-top:10px">WhatsApp *</label><input class="pdv-in" id="pdvExPhone" inputmode="tel" placeholder="(24) 99999-9999">'
+    +'<label class="pdv-lbl" for="pdvExName">Nome *</label><input class="pdv-in" id="pdvExName" autocomplete="name" placeholder="Nome do cliente">'
+    +'<label class="pdv-lbl" style="margin-top:10px" for="pdvExPhone">WhatsApp *</label><input class="pdv-in" id="pdvExPhone" inputmode="tel" placeholder="(24) 99999-9999">'
     +'<label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-size:12px"><input type="checkbox" id="pdvExOk" style="width:18px;height:18px;flex:none"> Cliente autorizou receber no WhatsApp o link de acesso ao app.</label>'
     +'<div class="pdv-btns"><button class="pdv-btn" id="pdvExGo" data-onclick="pdvCreateExpressCustomer()">Criar e enviar acesso</button>'
     +'<button class="pdv-btn ghost" data-onclick="pdvCustomerModal()">Voltar</button></div>');
@@ -2257,7 +2326,7 @@ function pdvOpenModal(){
     '<div class="pdv-row" style="gap:12px">'
       +'<div style="flex:1"><label class="pdv-lbl">Terminal</label>'
         +termField+'</div>'
-      +'<div style="flex:1"><label class="pdv-lbl">Troco inicial R$</label>'
+      +'<div style="flex:1"><label class="pdv-lbl" for="pdvOpenAmt">Troco inicial R$</label>'
         +'<input class="pdv-in num" id="pdvOpenAmt" value="0,00"></div>'
     +'</div>'
     +'<div class="pdv-note" style="margin-top:10px">O valor informado é o dinheiro que já está na gaveta '
@@ -2319,14 +2388,14 @@ function pdvQuickCustomerModal(returnTo='delivery'){
   pdvModal('Cadastro rápido do cliente',
     '<div class="pdv-note" style="margin-bottom:12px">'+intro+'</div>'
     +'<div class="pdv-quick-grid">'
-      +'<div class="wide"><label class="pdv-lbl">Nome *</label><input class="pdv-in" id="pdvQcName" autocomplete="name" placeholder="Nome do cliente" value="'+esc(seedName)+'"></div>'
-      +'<div><label class="pdv-lbl">CPF *</label><input class="pdv-in" id="pdvQcCpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" value="'+esc(seedCpf)+'" data-oninput="pdvQuickMaskCpf(this)"></div>'
-      +'<div><label class="pdv-lbl">WhatsApp</label><input class="pdv-in" id="pdvQcPhone" inputmode="tel" placeholder="Para enviar o PIX ao cliente"></div>'
+      +'<div class="wide"><label class="pdv-lbl" for="pdvQcName">Nome *</label><input class="pdv-in" id="pdvQcName" autocomplete="name" placeholder="Nome do cliente" value="'+esc(seedName)+'"></div>'
+      +'<div><label class="pdv-lbl" for="pdvQcCpf">CPF *</label><input class="pdv-in" id="pdvQcCpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" value="'+esc(seedCpf)+'" data-oninput="pdvQuickMaskCpf(this)"></div>'
+      +'<div><label class="pdv-lbl" for="pdvQcPhone">WhatsApp</label><input class="pdv-in" id="pdvQcPhone" inputmode="tel" placeholder="Para enviar o PIX ao cliente"></div>'
       +'<div><label class="pdv-lbl">CEP *</label><div class="pdv-row" style="gap:6px"><input class="pdv-in" style="flex:1;min-width:0" id="pdvQcCep" inputmode="numeric" maxlength="9" placeholder="00000-000" data-oninput="pdvQuickMaskCep(this)" data-onblur="pdvQuickCustomerCepIfComplete(this)"><button type="button" class="pdv-btn ghost" style="flex:0 0 auto" data-onclick="pdvQuickCustomerCep(this)">Buscar</button></div></div>'
-      +'<div><label class="pdv-lbl">Número / complemento *</label><input class="pdv-in" id="pdvQcNumber" placeholder="nº, apto, casa"></div>'
-      +'<div class="wide"><label class="pdv-lbl">Endereço *</label><input class="pdv-in" id="pdvQcAddress" placeholder="Rua / avenida"></div>'
-      +'<div><label class="pdv-lbl">Bairro</label><input class="pdv-in" id="pdvQcBairro" placeholder="Bairro"></div>'
-      +'<div><label class="pdv-lbl">Cidade / UF</label><input class="pdv-in" id="pdvQcCity" placeholder="Cidade / UF"></div>'
+      +'<div><label class="pdv-lbl" for="pdvQcNumber">Número / complemento *</label><input class="pdv-in" id="pdvQcNumber" placeholder="nº, apto, casa"></div>'
+      +'<div class="wide"><label class="pdv-lbl" for="pdvQcAddress">Endereço *</label><input class="pdv-in" id="pdvQcAddress" placeholder="Rua / avenida"></div>'
+      +'<div><label class="pdv-lbl" for="pdvQcBairro">Bairro</label><input class="pdv-in" id="pdvQcBairro" placeholder="Bairro"></div>'
+      +'<div><label class="pdv-lbl" for="pdvQcCity">Cidade / UF</label><input class="pdv-in" id="pdvQcCity" placeholder="Cidade / UF"></div>'
     +'</div>'
     +'<div class="pdv-btns"><button class="pdv-btn" id="pdvQcSave" data-onclick="pdvSaveQuickCustomer()">Salvar e continuar</button>'
     +'<button class="pdv-btn ghost" data-pdv-close>Cancelar</button></div>',true);
@@ -2420,15 +2489,15 @@ function pdvRenderDelivery(){
         +(c.telefone?' · '+esc(c.telefone):' · <span style="color:#ffb3b3">sem telefone</span>')
         +' <button class="pdv-btn ghost" style="padding:3px 8px;margin-left:6px" data-onclick="pdvCustomerModal()">trocar</button>'
         +' <button class="pdv-btn ghost" style="padding:3px 8px;margin-left:4px" data-onclick="pdvQuickCustomerModal()">cadastro rápido</button></div>'
-      +'<label class="pdv-lbl" style="margin-top:10px">Endereço de entrega</label>'
+      +'<label class="pdv-lbl" style="margin-top:10px" for="pdvDlEnd">Endereço de entrega</label>'
       +'<input class="pdv-in" id="pdvDlEnd" value="'+esc(c.endereco||'')+'" placeholder="rua, número, bairro" '+(pixPago?'readonly':'')+'>'
       +'<div class="pdv-row" style="gap:12px;margin-top:10px">'
-        +'<div style="flex:1"><label class="pdv-lbl">Frete R$</label>'
+        +'<div style="flex:1"><label class="pdv-lbl" for="pdvDlFrete">Frete R$</label>'
           +'<input class="pdv-in num" id="pdvDlFrete" value="'+PDV_DL.frete.toFixed(2).replace('.',',')+'" data-oninput="pdvDelivRecalc()" '+(pixPago?'readonly':'')+'></div>'
-        +'<div style="flex:1"><label class="pdv-lbl">Loja que entrega</label>'
+        +'<div style="flex:1"><label class="pdv-lbl" for="pdvDlLoja">Loja que entrega</label>'
           +'<select class="pdv-in" id="pdvDlLoja" '+(pixPago?'disabled':'')+'>'+lojas+'</select></div>'
       +'</div>'
-      +'<label class="pdv-lbl" style="margin-top:10px">Observação</label>'
+      +'<label class="pdv-lbl" style="margin-top:10px" for="pdvDlObs">Observação</label>'
       +'<input class="pdv-in" id="pdvDlObs" value="'+esc(c.obs||'')+'" placeholder="ex: portão azul, deixar com o porteiro" '+(pixPago?'readonly':'')+'>'
     +'</div>'
     +'<div style="flex:1 1 300px">'
@@ -2744,7 +2813,7 @@ const PDV_CRED={ cust:null, parcelas:[], sel:{} };
 
 async function pdvCrediarioModal(q){
   pdvModal('Crediário · receber parcelas 🧾',
-    '<label class="pdv-lbl">Buscar cliente por nome, telefone ou documento</label>'
+    '<label class="pdv-lbl" for="pdvCrQ">Buscar cliente por nome, telefone ou documento</label>'
     +'<div class="pdv-row" style="gap:8px">'
       +'<input class="pdv-in" id="pdvCrQ" style="flex:1;min-width:0" placeholder="digite e pressione Enter" value="'+esc(q||'')+'">'
       +'<button class="pdv-btn" style="flex:none" data-onclick="pdvCrediarioSearch()">Buscar</button>'
@@ -2824,12 +2893,12 @@ function pdvCredRender(){
     +'</div>'
     +'<div style="flex:1 1 290px">'
       +'<div class="pdv-sum" id="pdvCrSum"></div>'
-      +'<label class="pdv-lbl">Valor recebido agora R$</label>'
+      +'<label class="pdv-lbl" for="pdvCrVal">Valor recebido agora R$</label>'
       +'<input class="pdv-in num" id="pdvCrVal" value="0,00" data-oninput="pdvCredRecalc()">'
       +'<button class="pdv-btn ghost" style="width:100%;margin-top:6px" data-onclick="pdvCredFull()">Receber o total selecionado</button>'
             +'<label class="pdv-lbl" style="margin-top:10px">Forma de recebimento</label>'
       +'<div id="pdvCrSaldoBox" style="display:none;margin:2px 0 6px">'
-        +'<label class="pdv-lbl">Vencimento da nova cobrança (o restante)</label>'
+        +'<label class="pdv-lbl" for="pdvCrSaldoVenc">Vencimento da nova cobrança (o restante)</label>'
         +'<input class="pdv-in" id="pdvCrSaldoVenc" type="date">'
         +'<div class="pdv-note" style="margin-top:4px">Em branco = mantém o mesmo vencimento da parcela.</div>'
       +'</div>'
@@ -3043,8 +3112,8 @@ function pdvMoveModal(kind){
   if(!can(perm)){toast('Você não tem permissão para este movimento');return;}
   const sup=kind==='suprimento';
   pdvModal(sup?'Suprimento (entrada de dinheiro)':'Sangria (retirada de dinheiro)',
-    '<label class="pdv-lbl">Valor R$</label><input class="pdv-in num" id="pdvMvAmt" value="0,00">'
-    +'<label class="pdv-lbl" style="margin-top:10px">Motivo</label>'
+    '<label class="pdv-lbl" for="pdvMvAmt">Valor R$</label><input class="pdv-in num" id="pdvMvAmt" value="0,00">'
+    +'<label class="pdv-lbl" style="margin-top:10px" for="pdvMvWhy">Motivo</label>'
     +'<input class="pdv-in" id="pdvMvWhy" placeholder="'+(sup?'ex: reforço de troco':'ex: retirada para o cofre')+'">'
     +'<div class="pdv-btns"><button class="pdv-btn" id="pdvMvGo" data-onclick="pdvDoMove(\''+kind+'\')">Confirmar</button>'
     +'<button class="pdv-btn ghost" data-pdv-close>Cancelar</button></div>');
@@ -3083,7 +3152,7 @@ function pdvFinishModal(){
       +'<div class="pdv-row" style="gap:12px">'
         +'<div style="flex:1"><label class="pdv-lbl">Desconto geral R$</label>'
           +'<input class="pdv-in num" id="pdvFDisc" value="'+(can('pdv_desconto')?t.manual:0).toFixed(2).replace('.',',')+'" data-oninput="pdvFinishRecalc()" '+(can('pdv_desconto')?'':'disabled title="Sem permissão para desconto"')+'></div>'
-        +'<div style="flex:1"><label class="pdv-lbl">Acréscimo R$</label>'
+        +'<div style="flex:1"><label class="pdv-lbl" for="pdvFSur">Acréscimo R$</label>'
           +'<input class="pdv-in num" id="pdvFSur" value="'+t.sur.toFixed(2).replace('.',',')+'" data-oninput="pdvFinishRecalc()"></div>'
       +'</div>'
       +(c?'<div class="pdv-note" style="margin-top:10px">Cliente: <b>'+esc(c.name||'')+'</b></div>'
@@ -3091,7 +3160,7 @@ function pdvFinishModal(){
       +(CB_ACTIVE&&c&&(+c.cashback||0)>0
         ? '<div class="pdv-pay" style="flex-wrap:wrap;gap:8px;margin-top:10px;background:rgba(246,196,83,.15);border-radius:10px;padding:8px 10px">'
             +'<span style="font-weight:700;flex:1">🎁 Cashback disponível: <b>'+BRL(c.cashback)+'</b></span>'
-            +'<label class="pdv-lbl" style="flex:1 1 100%;margin:2px 0 0">Usar como desconto R$</label>'
+            +'<label class="pdv-lbl" style="flex:1 1 100%;margin:2px 0 0" for="pdvFCb">Usar como desconto R$</label>'
             +'<input class="pdv-in num" id="pdvFCb" style="max-width:130px" value="0,00" data-oninput="pdvFinishRecalc()">'
             +'<button type="button" class="pdv-btn ghost" style="flex:0 0 auto;padding:8px 12px" data-onclick="pdvUseAllCashback()">Usar tudo</button>'
           +'</div>'
@@ -3721,8 +3790,8 @@ function pdvVoidSaleModal(i){
   const s=(PDV._sales||[])[i];if(!s)return;const oid=s.order_id||s.id||('num:'+s.num);
   pdvModal('Cancelar venda #'+(s.num||''),
     '<div class="pdv-status-wait">Esta ação estorna o cashback, devolve o estoque e marca a venda como cancelada.</div>'
-    +'<label class="pdv-lbl" style="margin-top:12px">Motivo *</label><select class="pdv-in" id="pdvVoidReason"><option>Item errado</option><option>Cliente desistiu</option><option>Quantidade incorreta</option><option>PIX não recebido</option><option>Outro</option></select>'
-    +'<label class="pdv-lbl" style="margin-top:10px">Confirmação do operador</label><input class="pdv-in" id="pdvVoidConfirm" placeholder="Digite CANCELAR">'
+    +'<label class="pdv-lbl" style="margin-top:12px" for="pdvVoidReason">Motivo *</label><select class="pdv-in" id="pdvVoidReason"><option>Item errado</option><option>Cliente desistiu</option><option>Quantidade incorreta</option><option>PIX não recebido</option><option>Outro</option></select>'
+    +'<label class="pdv-lbl" style="margin-top:10px" for="pdvVoidConfirm">Confirmação do operador</label><input class="pdv-in" id="pdvVoidConfirm" placeholder="Digite CANCELAR">'
     +'<div class="pdv-btns"><button class="pdv-btn pdv-danger" id="pdvVoidGo" data-onclick="pdvVoidSale(\''+oid+'\')">Estornar venda</button><button class="pdv-btn ghost" data-onclick="pdvLastSalesModal()">Voltar</button></div>');
 }
 async function pdvVoidSale(orderId){
@@ -3806,10 +3875,10 @@ function pdvTerminalForm(i){
   const t=i>=0?PDV.terminals[i]:null;
   modal('<div class="m-head"><h3>'+(t?'Editar':'Novo')+' caixa</h3><button data-modal-close>✕</button></div>'
     +'<div class="m-body"><div class="grid2">'
-      +'<div class="field"><label class="lbl">Código do caixa</label><input class="in" id="pdvTC" value="'+esc(t?t.code:'CAIXA-')+'" placeholder="CAIXA-1"></div>'
-      +'<div class="field"><label class="lbl">Nome</label><input class="in" id="pdvTN" value="'+esc(t?t.name:'')+'" placeholder="Caixa principal"></div>'
-      +'<div class="field"><label class="lbl">Impressora térmica</label><input class="in" id="pdvTP" value="'+esc(t&&t.printer_name||'')+'" placeholder="Padrão do Windows"></div>'
-      +'<div class="field"><label class="lbl">Largura da bobina</label><select class="in" id="pdvTPaper"><option value="80" '+(!t||+t.paper_mm!==58?'selected':'')+'>80 mm</option><option value="58" '+(t&&+t.paper_mm===58?'selected':'')+'>58 mm</option></select></div>'
+      +'<div class="field"><label class="lbl" for="pdvTC">Código do caixa</label><input class="in" id="pdvTC" value="'+esc(t?t.code:'CAIXA-')+'" placeholder="CAIXA-1"></div>'
+      +'<div class="field"><label class="lbl" for="pdvTN">Nome</label><input class="in" id="pdvTN" value="'+esc(t?t.name:'')+'" placeholder="Caixa principal"></div>'
+      +'<div class="field"><label class="lbl" for="pdvTP">Impressora térmica</label><input class="in" id="pdvTP" value="'+esc(t&&t.printer_name||'')+'" placeholder="Padrão do Windows"></div>'
+      +'<div class="field"><label class="lbl" for="pdvTPaper">Largura da bobina</label><select class="in" id="pdvTPaper"><option value="80" '+(!t||+t.paper_mm!==58?'selected':'')+'>80 mm</option><option value="58" '+(t&&+t.paper_mm===58?'selected':'')+'>58 mm</option></select></div>'
       +'<div class="field" style="grid-column:1/-1"><label class="lbl">Maquininhas vinculadas (Mercado Pago Point)</label>'
         +'<div id="pdvTLinks" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">'
         +((PDV.machines||[]).length
@@ -3946,11 +4015,11 @@ async function pdvCloseModal2(){
       +(data.supplies>0?'<div class="l"><span>Suprimentos</span><b>+ '+BRL(data.supplies)+'</b></div>':'')
       +(data.withdrawals>0?'<div class="l"><span>Sangrias</span><b>− '+BRL(data.withdrawals)+'</b></div>':'')
       +'<div class="l big"><span>Dinheiro esperado</span><span>'+BRL(data.expected_cash)+'</span></div></div>'
-      +'<label class="pdv-lbl">Dinheiro contado na gaveta R$</label>'
+      +'<label class="pdv-lbl" for="pdvCloseAmt">Dinheiro contado na gaveta R$</label>'
       +'<input class="pdv-in num" id="pdvCloseAmt" value="'+Number(data.expected_cash).toFixed(2).replace('.',',')
         +'" data-oninput="pdvCloseDiff()">'
       +'<div id="pdvCloseDiff" class="pdv-note" style="margin-top:8px"></div>'
-      +'<label class="pdv-lbl" style="margin-top:10px">Observação</label>'
+      +'<label class="pdv-lbl" style="margin-top:10px" for="pdvCloseNote">Observação</label>'
       +'<input class="pdv-in" id="pdvCloseNote" placeholder="opcional">'
       +'<div class="pdv-btns"><button class="pdv-btn" id="pdvCloseGo" data-onclick="pdvDoClose()">Fechar caixa</button>'
       +'<button class="pdv-btn ghost" data-pdv-close>Cancelar</button></div>';
@@ -4124,9 +4193,9 @@ async function cashbackAdmin(){
           Programa de cashback ativo</label>
         <p class="muted" style="font-size:12px;margin:-4px 0 10px">Quando ativo, cada venda com cliente identificado credita cashback; o saldo pode ser resgatado como desconto no caixa. Vendas no crediário não geram cashback. Desligado = nada muda.</p>
         <div class="grid2">
-          <div class="field"><label class="lbl">% base (todos)</label><input id="cbPercent" class="in" inputmode="decimal" value="${c.percent!=null?c.percent:3}"></div>
-          <div class="field"><label class="lbl">Validade (dias)</label><input id="cbVal" class="in" inputmode="numeric" value="${c.validade_dias!=null?c.validade_dias:90}"></div>
-          <div class="field"><label class="lbl">Compra mínima (R$)</label><input id="cbMin" class="in" inputmode="decimal" value="${c.min_compra!=null?c.min_compra:0}"></div>
+          <div class="field"><label class="lbl" for="cbPercent">% base (todos)</label><input id="cbPercent" class="in" inputmode="decimal" value="${c.percent!=null?c.percent:3}"></div>
+          <div class="field"><label class="lbl" for="cbVal">Validade (dias)</label><input id="cbVal" class="in" inputmode="numeric" value="${c.validade_dias!=null?c.validade_dias:90}"></div>
+          <div class="field"><label class="lbl" for="cbMin">Compra mínima (R$)</label><input id="cbMin" class="in" inputmode="decimal" value="${c.min_compra!=null?c.min_compra:0}"></div>
         </div>
         <button class="btn" data-onclick="cashbackSaveConfig()">Salvar configuração</button>
       </div>
@@ -4180,12 +4249,12 @@ window.cashbackCampaignForm = (x={})=>{
   const segOpts=Object.keys(CB_SEG).map(k=>`<option value="${k}" ${x.segmento===k?'selected':''}>${CB_SEG[k]}</option>`).join('');
   modal(`<div class="m-head"><h3>${x.id?'Editar':'Nova'} campanha</h3><button data-modal-close>×</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Nome</label><input id="ccNome" class="in" value="${esc(x.nome||'')}" placeholder="ex: Dobro no aniversário"></div>
+      <div class="field"><label class="lbl" for="ccNome">Nome</label><input id="ccNome" class="in" value="${esc(x.nome||'')}" placeholder="ex: Dobro no aniversário"></div>
       <div class="grid2">
-        <div class="field"><label class="lbl">% cashback</label><input id="ccPct" class="in" inputmode="decimal" value="${x.percent!=null?x.percent:5}"></div>
-        <div class="field"><label class="lbl">Segmento</label><select id="ccSeg" class="in">${segOpts}</select></div>
-        <div class="field"><label class="lbl">Início (opcional)</label><input id="ccIni" type="date" class="in" value="${x.inicio||''}"></div>
-        <div class="field"><label class="lbl">Fim (opcional)</label><input id="ccFim" type="date" class="in" value="${x.fim||''}"></div>
+        <div class="field"><label class="lbl" for="ccPct">% cashback</label><input id="ccPct" class="in" inputmode="decimal" value="${x.percent!=null?x.percent:5}"></div>
+        <div class="field"><label class="lbl" for="ccSeg">Segmento</label><select id="ccSeg" class="in">${segOpts}</select></div>
+        <div class="field"><label class="lbl" for="ccIni">Início (opcional)</label><input id="ccIni" type="date" class="in" value="${x.inicio||''}"></div>
+        <div class="field"><label class="lbl" for="ccFim">Fim (opcional)</label><input id="ccFim" type="date" class="in" value="${x.fim||''}"></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;font-weight:700;cursor:pointer"><input type="checkbox" id="ccAtiva" ${x.ativa!==false?'checked':''} style="width:17px;height:17px;accent-color:var(--dark)"> Campanha ativa</label>
     </div>
@@ -4231,7 +4300,11 @@ window.cashbackStatement = async (custId, nome)=>{
 async function renderCustomers(){
   renderPetCrm();
   await loadCustomers();
-  const { data:bal } = await sb.from('v_customer_balance').select('*');
+  // Se só o saldo falhar, a lista de clientes ainda serve (a coluna sai como "—").
+  // Antes esse erro era descartado em silêncio; agora ao menos fica registrado.
+  let bal=[];
+  try{ bal = await fetchAllRows(()=> sb.from('v_customer_balance').select('*').order('customer_id')); }
+  catch(e){ logErr('customers-balance', e); }
   const balMap = Object.fromEntries((bal||[]).map(b=>[b.customer_id,b]));
   const q=($('#custFilter').value||'').toLowerCase();
   const list = CUSTOMERS.filter(c=>!q||c.nome.toLowerCase().includes(q)||(c.telefone||'').includes(q)||(c.documento||'').includes(q)||(c.codigo||'').toLowerCase().includes(q));
@@ -4254,41 +4327,41 @@ window.custForm = (c={})=>{
     <div class="m-head"><h3>${c.id?'Editar':'Novo'} cliente</h3><button data-modal-close>×</button></div>
     <div class="m-body">
       <div class="grid2">
-        <div class="field"><label class="lbl">Código (nº do cliente)</label><input id="cfCod" class="in" value="${esc(c.codigo||'')}" placeholder="ex: 1001"></div>
-        <div class="field"><label class="lbl">Nome *</label><input id="cfNome" class="in" value="${esc(c.nome||'')}"></div>
+        <div class="field"><label class="lbl" for="cfCod">Código (nº do cliente)</label><input id="cfCod" class="in" value="${esc(c.codigo||'')}" placeholder="ex: 1001"></div>
+        <div class="field"><label class="lbl" for="cfNome">Nome *</label><input id="cfNome" class="in" value="${esc(c.nome||'')}"></div>
       </div>
       <div class="grid2">
-        <div class="field"><label class="lbl">Telefone (WhatsApp)</label><input id="cfFone" class="in" value="${esc(c.telefone||'')}" placeholder="5521999998888"></div>
-        <div class="field"><label class="lbl">Documento</label><input id="cfDoc" class="in" value="${esc(c.documento||'')}"></div>
+        <div class="field"><label class="lbl" for="cfFone">Telefone (WhatsApp)</label><input id="cfFone" class="in" value="${esc(c.telefone||'')}" placeholder="5521999998888"></div>
+        <div class="field"><label class="lbl" for="cfDoc">Documento</label><input id="cfDoc" class="in" value="${esc(c.documento||'')}"></div>
       </div>
       <div class="grid2">
-        <div class="field"><label class="lbl">E-mail</label><input id="cfEmail" class="in" value="${esc(c.email||'')}"></div>
-        <div class="field"><label class="lbl">🎂 Nascimento</label><input id="cfNasc" type="date" class="in" value="${c.nascimento||''}"></div>
+        <div class="field"><label class="lbl" for="cfEmail">E-mail</label><input id="cfEmail" class="in" value="${esc(c.email||'')}"></div>
+        <div class="field"><label class="lbl" for="cfNasc">🎂 Nascimento</label><input id="cfNasc" type="date" class="in" value="${c.nascimento||''}"></div>
       </div>
       <div class="grid2">
-        <div class="field"><label class="lbl">CEP</label>
+        <div class="field"><label class="lbl" for="cfCep">CEP</label>
           <div style="display:flex;gap:6px">
             <input id="cfCep" class="in" placeholder="00000-000" inputmode="numeric" maxlength="9" data-oninput="maskCep(this)" data-onblur="buscaCepIfComplete(this)">
             <button type="button" class="btn ghost sm" data-onclick="buscaCep()">Buscar</button>
           </div>
         </div>
-        <div class="field"><label class="lbl">Número / complemento</label><input id="cfNum" class="in" placeholder="nº, apto…"></div>
+        <div class="field"><label class="lbl" for="cfNum">Número / complemento</label><input id="cfNum" class="in" placeholder="nº, apto…"></div>
       </div>
       <div class="grid2">
-        <div class="field"><label class="lbl">Endereço</label><input id="cfEnd" class="in" value="${esc(c.endereco||'')}"></div>
-        <div class="field"><label class="lbl">🏘️ Bairro</label><input id="cfBairro" class="in" value="${esc(c.bairro||'')}" list="bairroList" placeholder="para o frete por bairro" data-onchange="custBairroFrete()">
+        <div class="field"><label class="lbl" for="cfEnd">Endereço</label><input id="cfEnd" class="in" value="${esc(c.endereco||'')}"></div>
+        <div class="field"><label class="lbl" for="cfBairro">🏘️ Bairro</label><input id="cfBairro" class="in" value="${esc(c.bairro||'')}" list="bairroList" placeholder="para o frete por bairro" data-onchange="custBairroFrete()">
           <datalist id="bairroList">${(FRETE_RULES||[]).map(r=>`<option value="${esc(r.bairro)}">`).join('')}</datalist></div>
       </div>
       <div class="grid2">
-        <div class="field"><label class="lbl">Limite de crédito (crediário)</label><input id="cfLim" class="in" value="${c.limite_credito||0}"></div>
-        <div class="field"><label class="lbl">🚚 Valor do frete (entrega)</label><input id="cfFrete" class="in" value="${c.frete||0}" inputmode="decimal"></div>
+        <div class="field"><label class="lbl" for="cfLim">Limite de crédito (crediário)</label><input id="cfLim" class="in" value="${c.limite_credito||0}"></div>
+        <div class="field"><label class="lbl" for="cfFrete">🚚 Valor do frete (entrega)</label><input id="cfFrete" class="in" value="${c.frete||0}" inputmode="decimal"></div>
       </div>
-      <div class="field"><label class="lbl">Observações</label><textarea id="cfObs" class="in" rows="2" style="resize:vertical" placeholder="Ponto de referência, preferências, etc.">${esc(c.obs||'')}</textarea></div>
+      <div class="field"><label class="lbl" for="cfObs">Observações</label><textarea id="cfObs" class="in" rows="2" style="resize:vertical" placeholder="Ponto de referência, preferências, etc.">${esc(c.obs||'')}</textarea></div>
       <hr style="border:0;border-top:1px solid var(--line);margin:14px 0 6px">
       <div class="field"><label class="lbl">🔐 Acesso ao portal do cliente ${c.auth_user_id?'<span class="chip ok">ativo</span>':'<span class="chip">sem acesso</span>'}</label>
         <p class="muted" style="font-size:12.5px;margin:0 0 8px">O cliente entra no portal (<b>cliente.html</b>) com o <b>e-mail acima</b> e a senha definida aqui. ${c.id?'':'Salve o cliente primeiro para liberar o acesso.'}</p>
         ${c.id?`<div class="grid2">
-          <div class="field"><label class="lbl">Senha do portal (mín. 6)</label><input id="cfPortalPass" class="in" type="text" autocomplete="new-password" placeholder="${c.auth_user_id?'digite para redefinir':'defina a senha'}"></div>
+          <div class="field"><label class="lbl" for="cfPortalPass">Senha do portal (mín. 6)</label><input id="cfPortalPass" class="in" type="text" autocomplete="new-password" placeholder="${c.auth_user_id?'digite para redefinir':'defina a senha'}"></div>
           <div class="field" style="display:flex;align-items:flex-end"><button type="button" class="btn" style="width:100%" data-onclick="portalAccess('${c.id}')">${c.auth_user_id?'Atualizar acesso':'Liberar acesso'}</button></div>
         </div>`:''}
       </div>
@@ -4378,20 +4451,20 @@ window.petForm=(petId)=>{
   const sel=(v,opts)=>opts.map(o=>`<option ${((p&&p[v])||'')===o?'selected':''}>${o}</option>`).join('');
   modal(`<div class="m-head"><h3>${p?'Editar pet':'Novo pet'} 🐾</h3><button data-onclick="petsBack()">✕</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Nome *</label><input id="ptNome" class="in" value="${esc(p?p.nome:'')}"></div>
+      <div class="field"><label class="lbl" for="ptNome">Nome *</label><input id="ptNome" class="in" value="${esc(p?p.nome:'')}"></div>
       <div class="grid2">
-        <div class="field"><label class="lbl">Espécie</label><select id="ptEsp" class="in"><option value=""></option>${sel('especie',['Cão','Gato','Ave','Roedor','Réptil','Peixe','Outro'])}</select></div>
-        <div class="field"><label class="lbl">Raça</label><input id="ptRaca" class="in" value="${esc(p?p.raca||'':'')}"></div>
+        <div class="field"><label class="lbl" for="ptEsp">Espécie</label><select id="ptEsp" class="in"><option value=""></option>${sel('especie',['Cão','Gato','Ave','Roedor','Réptil','Peixe','Outro'])}</select></div>
+        <div class="field"><label class="lbl" for="ptRaca">Raça</label><input id="ptRaca" class="in" value="${esc(p?p.raca||'':'')}"></div>
       </div>
       <div class="grid2">
-        <div class="field"><label class="lbl">Porte</label><select id="ptPorte" class="in"><option value=""></option>${sel('porte',['P','M','G','GG'])}</select></div>
-        <div class="field"><label class="lbl">Sexo</label><select id="ptSexo" class="in"><option value=""></option>${sel('sexo',['M','F'])}</select></div>
+        <div class="field"><label class="lbl" for="ptPorte">Porte</label><select id="ptPorte" class="in"><option value=""></option>${sel('porte',['P','M','G','GG'])}</select></div>
+        <div class="field"><label class="lbl" for="ptSexo">Sexo</label><select id="ptSexo" class="in"><option value=""></option>${sel('sexo',['M','F'])}</select></div>
       </div>
       <div class="grid2">
-        <div class="field"><label class="lbl">Nascimento</label><input id="ptNasc" type="date" class="in" value="${p&&p.nascimento?p.nascimento:''}"></div>
-        <div class="field"><label class="lbl">Peso (kg)</label><input id="ptPeso" class="in" inputmode="decimal" value="${p&&p.peso!=null?fmtNum(p.peso):''}"></div>
+        <div class="field"><label class="lbl" for="ptNasc">Nascimento</label><input id="ptNasc" type="date" class="in" value="${p&&p.nascimento?p.nascimento:''}"></div>
+        <div class="field"><label class="lbl" for="ptPeso">Peso (kg)</label><input id="ptPeso" class="in" inputmode="decimal" value="${p&&p.peso!=null?fmtNum(p.peso):''}"></div>
       </div>
-      <div class="field"><label class="lbl">Observações</label><input id="ptObs" class="in" value="${esc(p?p.obs||'':'')}"></div>
+      <div class="field"><label class="lbl" for="ptObs">Observações</label><input id="ptObs" class="in" value="${esc(p?p.obs||'':'')}"></div>
     </div>
     <div class="m-foot"><button class="btn ghost" data-onclick="petsBack()">Voltar</button>
       <button class="btn green" data-onclick="petSave(${p?`'${p.id}'`:'null'})">Salvar</button></div>`);
@@ -4414,13 +4487,13 @@ window.petHealthForm=(petId, hid)=>{
   const tipoOpts=Object.keys(PET_HTYPE).map(k=>`<option value="${k}" ${h&&h.tipo===k?'selected':''}>${PET_HTYPE[k]}</option>`).join('');
   modal(`<div class="m-head"><h3>Vacina / registro de saúde</h3><button data-onclick="petsBack()">✕</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Tipo</label><select id="phTipo" class="in">${tipoOpts}</select></div>
-      <div class="field"><label class="lbl">Descrição (ex.: V10, Antirrábica, Vermífugo)</label><input id="phDesc" class="in" value="${esc(h?h.descricao||'':'')}"></div>
+      <div class="field"><label class="lbl" for="phTipo">Tipo</label><select id="phTipo" class="in">${tipoOpts}</select></div>
+      <div class="field"><label class="lbl" for="phDesc">Descrição (ex.: V10, Antirrábica, Vermífugo)</label><input id="phDesc" class="in" value="${esc(h?h.descricao||'':'')}"></div>
       <div class="grid2">
-        <div class="field"><label class="lbl">Aplicada em</label><input id="phApl" type="date" class="in" value="${h&&h.aplicada_em?h.aplicada_em:hojeISO()}"></div>
-        <div class="field"><label class="lbl">Próxima dose / reforço</label><input id="phProx" type="date" class="in" value="${h&&h.proxima_em?h.proxima_em:''}"></div>
+        <div class="field"><label class="lbl" for="phApl">Aplicada em</label><input id="phApl" type="date" class="in" value="${h&&h.aplicada_em?h.aplicada_em:hojeISO()}"></div>
+        <div class="field"><label class="lbl" for="phProx">Próxima dose / reforço</label><input id="phProx" type="date" class="in" value="${h&&h.proxima_em?h.proxima_em:''}"></div>
       </div>
-      <div class="field"><label class="lbl">Observações</label><input id="phObs" class="in" value="${esc(h?h.obs||'':'')}"></div>
+      <div class="field"><label class="lbl" for="phObs">Observações</label><input id="phObs" class="in" value="${esc(h?h.obs||'':'')}"></div>
     </div>
     <div class="m-foot"><button class="btn ghost" data-onclick="petsBack()">Voltar</button>
       <button class="btn green" data-onclick="petHealthSave('${petId}',${h?`'${h.id}'`:'null'})">Salvar</button></div>`);
@@ -4712,29 +4785,29 @@ window.prodForm = (p={})=>{
   modal(`
     <div class="m-head"><h3>${p.id?'Editar':'Novo'} produto</h3><button data-modal-close>×</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Nome *</label><input id="pfNome" class="in" value="${esc(p.nome||'')}"></div>
+      <div class="field"><label class="lbl" for="pfNome">Nome *</label><input id="pfNome" class="in" value="${esc(p.nome||'')}"></div>
       <div class="grid2">
-        <div class="field"><label class="lbl">SKU</label><input id="pfSku" class="in" value="${esc(p.sku||'')}"></div>
-        <div class="field"><label class="lbl">Código de barras</label><input id="pfBar" class="in" value="${esc(p.codigo_barras||'')}"></div>
-        <div class="field"><label class="lbl">Preço de venda *</label><input id="pfPreco" class="in" value="${p.preco||0}"></div>
-        <div class="field"><label class="lbl">Custo</label><input id="pfCusto" class="in" value="${p.custo||0}"></div>
-        <div class="field"><label class="lbl">Unidade</label><input id="pfUn" class="in" value="${esc(p.unidade||'un')}"></div>
-        <div class="field"><label class="lbl">🏷️ Categoria</label><input id="pfCat" class="in" value="${esc(p.categoria||'')}" list="catList" placeholder="ex: Ração, Higiene…">
+        <div class="field"><label class="lbl" for="pfSku">SKU</label><input id="pfSku" class="in" value="${esc(p.sku||'')}"></div>
+        <div class="field"><label class="lbl" for="pfBar">Código de barras</label><input id="pfBar" class="in" value="${esc(p.codigo_barras||'')}"></div>
+        <div class="field"><label class="lbl" for="pfPreco">Preço de venda *</label><input id="pfPreco" class="in" value="${p.preco||0}"></div>
+        <div class="field"><label class="lbl" for="pfCusto">Custo</label><input id="pfCusto" class="in" value="${p.custo||0}"></div>
+        <div class="field"><label class="lbl" for="pfUn">Unidade</label><input id="pfUn" class="in" value="${esc(p.unidade||'un')}"></div>
+        <div class="field"><label class="lbl" for="pfCat">🏷️ Categoria</label><input id="pfCat" class="in" value="${esc(p.categoria||'')}" list="catList" placeholder="ex: Ração, Higiene…">
           <datalist id="catList">${[...new Set((PRODUCTS||[]).map(x=>x.categoria).filter(Boolean))].map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
-        <div class="field"><label class="lbl">📦 Embalagem de venda</label><input id="pfEmb" class="in" value="${esc(p.embalagem||'')}" placeholder="ex: Fardo, Caixa, Pacote"></div>
-        <div class="field"><label class="lbl">Quantidade da embalagem</label><input id="pfPack" class="in" value="${p.pack_size||1}" inputmode="decimal" placeholder="ex: 6, 12…"></div>
-        <div class="field"><label class="lbl">Estoque mínimo (loja atual)</label><input id="pfMin" class="in" value="${p.estoque_min||0}"></div>
-        <div class="field"><label class="lbl">🔁 Recompra a cada (dias)</label><input id="pfRec" class="in" value="${p.dias_recompra!=null?p.dias_recompra:''}" inputmode="numeric" placeholder="ex: 30 (ração)"></div>
-        <div class="field"><label class="lbl">🏭 Fornecedor</label><select id="pfSup" class="in"><option value="">— nenhum —</option>${SUPPLIERS.map(x=>`<option value="${x.id}" ${p.supplier_id===x.id?'selected':''}>${esc(x.nome)}</option>`).join('')}</select></div>
-        <div class="field"><label class="lbl">NCM (fiscal)</label><input id="pfNcm" class="in" value="${esc(p.ncm||'')}" placeholder="8 dígitos"></div>
-        <div class="field"><label class="lbl">CEST</label><input id="pfCest" class="in" value="${esc(p.cest||'')}" placeholder="7 dígitos"></div>
-        <div class="field"><label class="lbl">CFOP</label><input id="pfCfop" class="in" value="${esc(p.cfop||'5102')}"></div>
-        <div class="field"><label class="lbl">CSOSN / CST</label><input id="pfCsosn" class="in" value="${esc(p.csosn||'102')}"></div>
-        <div class="field"><label class="lbl">Origem</label><input id="pfOrigem" class="in" value="${p.origem!=null?p.origem:0}"></div>
+        <div class="field"><label class="lbl" for="pfEmb">📦 Embalagem de venda</label><input id="pfEmb" class="in" value="${esc(p.embalagem||'')}" placeholder="ex: Fardo, Caixa, Pacote"></div>
+        <div class="field"><label class="lbl" for="pfPack">Quantidade da embalagem</label><input id="pfPack" class="in" value="${p.pack_size||1}" inputmode="decimal" placeholder="ex: 6, 12…"></div>
+        <div class="field"><label class="lbl" for="pfMin">Estoque mínimo (loja atual)</label><input id="pfMin" class="in" value="${p.estoque_min||0}"></div>
+        <div class="field"><label class="lbl" for="pfRec">🔁 Recompra a cada (dias)</label><input id="pfRec" class="in" value="${p.dias_recompra!=null?p.dias_recompra:''}" inputmode="numeric" placeholder="ex: 30 (ração)"></div>
+        <div class="field"><label class="lbl" for="pfSup">🏭 Fornecedor</label><select id="pfSup" class="in"><option value="">— nenhum —</option>${SUPPLIERS.map(x=>`<option value="${x.id}" ${p.supplier_id===x.id?'selected':''}>${esc(x.nome)}</option>`).join('')}</select></div>
+        <div class="field"><label class="lbl" for="pfNcm">NCM (fiscal)</label><input id="pfNcm" class="in" value="${esc(p.ncm||'')}" placeholder="8 dígitos"></div>
+        <div class="field"><label class="lbl" for="pfCest">CEST</label><input id="pfCest" class="in" value="${esc(p.cest||'')}" placeholder="7 dígitos"></div>
+        <div class="field"><label class="lbl" for="pfCfop">CFOP</label><input id="pfCfop" class="in" value="${esc(p.cfop||'5102')}"></div>
+        <div class="field"><label class="lbl" for="pfCsosn">CSOSN / CST</label><input id="pfCsosn" class="in" value="${esc(p.csosn||'102')}"></div>
+        <div class="field"><label class="lbl" for="pfOrigem">Origem</label><input id="pfOrigem" class="in" value="${p.origem!=null?p.origem:0}"></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;font-weight:700;margin-top:4px">
         <input type="checkbox" id="pfTrack" ${p.track_stock!==false?'checked':''}> Controlar estoque deste produto</label>
-      ${!p.id?`<div class="field" style="margin-top:11px"><label class="lbl">Estoque inicial</label><input id="pfEst" class="in" value="0"></div>`:''}
+      ${!p.id?`<div class="field" style="margin-top:11px"><label class="lbl" for="pfEst">Estoque inicial</label><input id="pfEst" class="in" value="0"></div>`:''}
     </div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button>
       <button class="btn" data-onclick='saveProd(${p.id?`"${p.id}"`:'null'})'>Salvar</button></div>`);
@@ -4760,12 +4833,12 @@ window.entryForm = (pid)=>{
   modal(`
     <div class="m-head"><h3>Entrada / reposição</h3><button data-modal-close>×</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Produto</label><select id="efProd" class="in">${opts}</select></div>
+      <div class="field"><label class="lbl" for="efProd">Produto</label><select id="efProd" class="in">${opts}</select></div>
       <div class="grid2">
-        <div class="field"><label class="lbl">Quantidade *</label><input id="efQtd" class="in" value="1" inputmode="decimal"></div>
-        <div class="field"><label class="lbl">Custo unitário (opcional)</label><input id="efCusto" class="in" placeholder="mantém atual"></div>
+        <div class="field"><label class="lbl" for="efQtd">Quantidade *</label><input id="efQtd" class="in" value="1" inputmode="decimal"></div>
+        <div class="field"><label class="lbl" for="efCusto">Custo unitário (opcional)</label><input id="efCusto" class="in" placeholder="mantém atual"></div>
       </div>
-      <div class="field"><label class="lbl">Motivo</label><input id="efMot" class="in" value="Reposição"></div>
+      <div class="field"><label class="lbl" for="efMot">Motivo</label><input id="efMot" class="in" value="Reposição"></div>
       <p class="muted" style="font-size:13px">Funciona também para produtos sem controle de estoque (registra a compra e o custo).</p>
     </div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button>
@@ -5191,8 +5264,8 @@ window.freteForm=(id)=>{
   const r = id ? (FRETE_RULES||[]).find(x=>x.id===id) : null;
   modal(`<div class="m-head"><h3>${r?'Editar':'Novo'} bairro</h3><button data-modal-close>×</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Bairro *</label><input id="fbBairro" class="in" value="${esc(r?r.bairro:'')}"></div>
-      <div class="field"><label class="lbl">Frete R$</label><input id="fbValor" class="in" inputmode="decimal" value="${r?fmtNum(r.valor):'0,00'}"></div>
+      <div class="field"><label class="lbl" for="fbBairro">Bairro *</label><input id="fbBairro" class="in" value="${esc(r?r.bairro:'')}"></div>
+      <div class="field"><label class="lbl" for="fbValor">Frete R$</label><input id="fbValor" class="in" inputmode="decimal" value="${r?fmtNum(r.valor):'0,00'}"></div>
     </div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button>
       <button class="btn green" data-onclick="freteSave(${r?`'${r.id}'`:'null'})">Salvar</button></div>`);
@@ -5715,7 +5788,35 @@ async function renderAudit(){
   if(!$('#auBody')) return;
   if($('#auIni')&&!$('#auIni').value){ const i=new Date(); i.setDate(i.getDate()-7); $('#auIni').value=i.toISOString().slice(0,10); }
   if($('#auFim')&&!$('#auFim').value){ $('#auFim').value=new Date().toISOString().slice(0,10); }
-  auEntities(); auLoad();
+  auEntities(); auLoad(); ceLoad();
+}
+// Erros do caixa (tabela client_error_log, gravada pelo logErr de cada terminal).
+// A RPC erp_client_errors filtra por is_admin() dentro dela, então para operador a
+// consulta volta vazia em vez de dar erro — a tela degrada sozinha.
+async function ceLoad(){
+  const body=$('#ceBody'); if(!body) return;
+  const dias=+(($('#ceDias')&&$('#ceDias').value)||7);
+  body.innerHTML='<tr><td colspan="8" class="muted">Carregando…</td></tr>';
+  try{
+    const { data, error } = await sb.rpc('erp_client_errors',{ p_dias:dias });
+    if(error) throw error;
+    const rows=data||[];
+    body.innerHTML = rows.length ? rows.map(r=>`
+      <tr>
+        <td style="white-space:nowrap">${fmtDT(r.created_at)}</td>
+        <td>${esc(r.loja||'—')}</td>
+        <td>${esc(r.terminal||'—')}</td>
+        <td>${esc(r.papel||'—')}</td>
+        <td>${esc(r.versao||'—')}</td>
+        <td><span class="chip warn">${esc(r.kind||'erro')}</span></td>
+        <td>${esc(r.message||'')}</td>
+        <td class="r">${+r.ocorrencias||1}</td>
+      </tr>`).join('')
+      : '<tr><td colspan="8" class="muted">Nenhum erro registrado no período.</td></tr>';
+  }catch(e){
+    body.innerHTML='<tr><td colspan="8" class="muted">Não foi possível carregar os erros.</td></tr>';
+    if(!isNetworkErr(e)) toast('Erro: '+((e&&e.message)||e),true);
+  }
 }
 async function auEntities(){
   const sel=$('#auEntity'); if(!sel) return;
@@ -5760,6 +5861,8 @@ window.auDetail=(idx)=>{
     <div class="m-foot"><button class="btn" data-modal-close>Fechar</button></div>`);
 };
 { const b=$('#btnAuLoad'); if(b) b.onclick=auLoad; }
+{ const b=$('#btnCeLoad'); if(b) b.onclick=ceLoad; }
+{ const s=$('#ceDias'); if(s) s.onchange=ceLoad; }
 ['auEntity','auAction'].forEach(id=>{ const el=$('#'+id); if(el) el.onchange=auLoad; });
 { const q=$('#auQ'); if(q){ let t; q.oninput=()=>{ clearTimeout(t); t=setTimeout(auLoad,350); }; } }
 
@@ -5800,11 +5903,11 @@ async function npsLoad(){
 window.npsAddModal=()=>{
   modal(`<div class="m-head"><h3>Registrar resposta NPS</h3><button data-modal-close>✕</button></div>
     <div class="m-body">
-      <label class="lbl">Nota (0 a 10)</label>
+      <label class="lbl" for="npsScore">Nota (0 a 10)</label>
       <input id="npsScore" class="in" type="number" min="0" max="10" inputmode="numeric" placeholder="0-10">
-      <label class="lbl" style="margin-top:8px">Cliente (opcional)</label>
+      <label class="lbl" style="margin-top:8px" for="npsCust">Cliente (opcional)</label>
       <input id="npsCust" class="in" list="npsCustList" placeholder="Nome do cliente…"><datalist id="npsCustList"></datalist>
-      <label class="lbl" style="margin-top:8px">Comentário (opcional)</label>
+      <label class="lbl" style="margin-top:8px" for="npsComment">Comentário (opcional)</label>
       <textarea id="npsComment" class="in" style="height:70px" placeholder="O que o cliente disse…"></textarea>
     </div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="npsSave()">Salvar</button></div>`);
@@ -5936,7 +6039,7 @@ function promoModal(r){
   let selector;
   if(editing){
     const opts=prods.map(p=>`<option value="${p.id}" ${r.product_id===p.id?'selected':''}>${esc(p.name||'')} — ${BRL(p.price||0)}</option>`).join('');
-    selector=`<label class="lbl">Produto</label><select id="promoProd" class="in">${opts}</select>`;
+    selector=`<label class="lbl" for="promoProd">Produto</label><select id="promoProd" class="in">${opts}</select>`;
   }else{
     const withPromo=new Set((PROMO_ROWS||[]).map(x=>x.product_id));
     const items=prods.map(p=>`<label class="promoItem" data-name="${esc(String(p.name||'').toLowerCase())}" style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13.5px;cursor:pointer">
@@ -5958,24 +6061,24 @@ function promoModal(r){
   const packPreco=(isPack&&r.pacote_preco!=null)?(+r.pacote_preco).toFixed(2).replace('.',','):'';
   modal(`<div class="m-head"><h3>${editing?'Editar':'Nova'} promoção</h3><button data-modal-close>✕</button></div>
     <div class="m-body">
-      <label class="lbl">Tipo de promoção</label>
+      <label class="lbl" for="promoTipo">Tipo de promoção</label>
       <select id="promoTipo" class="in" data-onchange="promoTipoChange()">
         <option value="unitario" ${!isPack?'selected':''}>Por quantidade — cada unidade sai mais barata</option>
         <option value="pacote" ${isPack?'selected':''}>Pacote fechado — leve N por R$ Y</option>
       </select>
       <div style="margin-top:12px">${selector}</div>
       <div id="promoGrpUnit" style="display:${isPack?'none':'flex'};gap:8px;margin-top:10px">
-        <div style="flex:1"><label class="lbl">A partir de (un)</label><input id="promoMin" class="in" type="number" min="2" step="1" value="${unitMin}"></div>
-        <div style="flex:1"><label class="lbl">Preço unitário promo R$</label><input id="promoPreco" class="in" value="${unitPreco}"></div>
+        <div style="flex:1"><label class="lbl" for="promoMin">A partir de (un)</label><input id="promoMin" class="in" type="number" min="2" step="1" value="${unitMin}"></div>
+        <div style="flex:1"><label class="lbl" for="promoPreco">Preço unitário promo R$</label><input id="promoPreco" class="in" value="${unitPreco}"></div>
       </div>
       <div id="promoGrpPack" style="display:${isPack?'block':'none'};margin-top:10px">
         <div style="display:flex;gap:8px">
-          <div style="flex:1"><label class="lbl">Quantidade do pacote (N)</label><input id="promoPackN" class="in" type="number" min="2" step="1" value="${packN}"></div>
-          <div style="flex:1"><label class="lbl">Preço do pacote R$ (Y)</label><input id="promoPackPreco" class="in" value="${packPreco}"></div>
+          <div style="flex:1"><label class="lbl" for="promoPackN">Quantidade do pacote (N)</label><input id="promoPackN" class="in" type="number" min="2" step="1" value="${packN}"></div>
+          <div style="flex:1"><label class="lbl" for="promoPackPreco">Preço do pacote R$ (Y)</label><input id="promoPackPreco" class="in" value="${packPreco}"></div>
         </div>
         <div class="pdv-note" style="margin-top:8px">Leve <b>N</b> unidades por <b>R$ Y</b>. A sobra sai ao preço normal. Ex.: 4 por R$ 10 — comprando 5, os 4 saem a R$ 10 e o 5º ao preço normal; comprando 8, dois pacotes a R$ 10.</div>
       </div>
-      <div class="grid2" style="margin-top:10px"><div class="field"><label class="lbl">Início (opcional)</label><input id="promoFrom" class="in" type="date" value="${r.valid_from||''}"></div><div class="field"><label class="lbl">Fim (opcional)</label><input id="promoUntil" class="in" type="date" value="${r.valid_until||''}"></div></div>
+      <div class="grid2" style="margin-top:10px"><div class="field"><label class="lbl" for="promoFrom">Início (opcional)</label><input id="promoFrom" class="in" type="date" value="${r.valid_from||''}"></div><div class="field"><label class="lbl" for="promoUntil">Fim (opcional)</label><input id="promoUntil" class="in" type="date" value="${r.valid_until||''}"></div></div>
       <label class="lbl" style="margin-top:10px;display:flex;align-items:center;gap:6px"><input type="checkbox" id="promoAtivo" ${r.ativo!==false?'checked':''}> Ativa</label>
     </div>
     <div class="m-foot"><button class="btn green" data-onclick="promoSave('${r.id||''}')">Salvar</button><button class="btn ghost" data-modal-close>Cancelar</button></div>`);
@@ -6093,8 +6196,8 @@ window.cashMove = async (tipo)=>{
   modal(`
     <div class="m-head"><h3>${tipo==='sangria'?'↥ Sangria (retirada)':'↧ Suprimento (entrada)'}</h3><button data-modal-close>×</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Valor *</label><input id="cmVal" class="in" inputmode="decimal" value=""></div>
-      <div class="field"><label class="lbl">Motivo</label><input id="cmMot" class="in" placeholder="${tipo==='sangria'?'Ex: depósito bancário':'Ex: troco'}"></div>
+      <div class="field"><label class="lbl" for="cmVal">Valor *</label><input id="cmVal" class="in" inputmode="decimal" value=""></div>
+      <div class="field"><label class="lbl" for="cmMot">Motivo</label><input id="cmMot" class="in" placeholder="${tipo==='sangria'?'Ex: depósito bancário':'Ex: troco'}"></div>
     </div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button>
       <button class="btn" data-onclick="doCashMove('${tipo}')">Confirmar</button></div>`);
@@ -6207,16 +6310,16 @@ async function feeRulesModal(){
 window.feeRuleForm=id=>{
   const r=FEE_RULES.find(x=>x.id===id)||{};const storeOpt='<option value="">Todas as lojas</option>'+STORES.map(s=>`<option value="${s.id}" ${r.store_id===s.id?'selected':''}>${esc(s.nome)}</option>`).join('');
   modal(`<div class="m-head"><h3>${id?'Editar':'Nova'} regra de taxa</h3><button data-modal-close>✕</button></div><div class="m-body">
-    <div class="grid2"><div class="field"><label class="lbl">Loja</label><select id="frStore" class="in">${storeOpt}</select></div><div class="field"><label class="lbl">Meio</label><select id="frMethod" class="in">${['dinheiro','pix','debito','credito','cartao'].map(x=>`<option ${r.metodo===x?'selected':''}>${x}</option>`).join('')}</select></div></div>
-    <div class="grid2"><div class="field"><label class="lbl">Operadora</label><input id="frProvider" class="in" value="${esc(r.provider||'qualquer')}"></div><div class="field"><label class="lbl">Bandeira</label><input id="frBrand" class="in" value="${esc(r.bandeira||'qualquer')}"></div></div>
-    <div class="grid2"><div class="field"><label class="lbl">Parcelas mín./máx.</label><div style="display:flex;gap:6px"><input id="frMin" class="in" value="${r.parcelas_min||1}"><input id="frMax" class="in" value="${r.parcelas_max||1}"></div></div><div class="field"><label class="lbl">Recebimento em dias</label><input id="frDays" class="in" value="${r.settlement_days||0}"></div></div>
-    <div class="grid2"><div class="field"><label class="lbl">Taxa % / fixa R$</label><div style="display:flex;gap:6px"><input id="frFee" class="in" value="${r.fee_pct||0}"><input id="frFixed" class="in" value="${r.fixed_fee||0}"></div></div><div class="field"><label class="lbl">Antecipação %</label><input id="frAnt" class="in" value="${r.anticipation_pct||0}"></div></div>
-    <div class="grid2"><div class="field"><label class="lbl">Válida desde</label><input id="frFrom" type="date" class="in" value="${r.valid_from||hojeISO()}"></div><div class="field"><label class="lbl">Até (opcional)</label><input id="frUntil" type="date" class="in" value="${r.valid_until||''}"></div></div>
+    <div class="grid2"><div class="field"><label class="lbl" for="frStore">Loja</label><select id="frStore" class="in">${storeOpt}</select></div><div class="field"><label class="lbl" for="frMethod">Meio</label><select id="frMethod" class="in">${['dinheiro','pix','debito','credito','cartao'].map(x=>`<option ${r.metodo===x?'selected':''}>${x}</option>`).join('')}</select></div></div>
+    <div class="grid2"><div class="field"><label class="lbl" for="frProvider">Operadora</label><input id="frProvider" class="in" value="${esc(r.provider||'qualquer')}"></div><div class="field"><label class="lbl" for="frBrand">Bandeira</label><input id="frBrand" class="in" value="${esc(r.bandeira||'qualquer')}"></div></div>
+    <div class="grid2"><div class="field"><label class="lbl" for="frMin">Parcelas mín./máx.</label><div style="display:flex;gap:6px"><input id="frMin" class="in" value="${r.parcelas_min||1}"><input id="frMax" class="in" value="${r.parcelas_max||1}"></div></div><div class="field"><label class="lbl" for="frDays">Recebimento em dias</label><input id="frDays" class="in" value="${r.settlement_days||0}"></div></div>
+    <div class="grid2"><div class="field"><label class="lbl" for="frFee">Taxa % / fixa R$</label><div style="display:flex;gap:6px"><input id="frFee" class="in" value="${r.fee_pct||0}"><input id="frFixed" class="in" value="${r.fixed_fee||0}"></div></div><div class="field"><label class="lbl" for="frAnt">Antecipação %</label><input id="frAnt" class="in" value="${r.anticipation_pct||0}"></div></div>
+    <div class="grid2"><div class="field"><label class="lbl" for="frFrom">Válida desde</label><input id="frFrom" type="date" class="in" value="${r.valid_from||hojeISO()}"></div><div class="field"><label class="lbl" for="frUntil">Até (opcional)</label><input id="frUntil" type="date" class="in" value="${r.valid_until||''}"></div></div>
     </div><div class="m-foot"><button class="btn ghost" data-onclick="feeRulesModal()">Voltar</button><button class="btn green" data-onclick="feeRuleSave('${id||''}')">Salvar</button></div>`);
 };
 window.feeRuleSave=async id=>{const p={id:id||null,store_id:$('#frStore').value||null,metodo:$('#frMethod').value,provider:$('#frProvider').value.trim()||'qualquer',bandeira:$('#frBrand').value.trim()||'qualquer',parcelas_min:parseInt($('#frMin').value)||1,parcelas_max:parseInt($('#frMax').value)||1,settlement_days:parseInt($('#frDays').value)||0,fee_pct:num($('#frFee').value)||0,fixed_fee:num($('#frFixed').value)||0,anticipation_pct:num($('#frAnt').value)||0,valid_from:$('#frFrom').value,valid_until:$('#frUntil').value||null,active:true};const {error}=await sb.rpc('erp_payment_fee_rule_upsert',{p});if(error){toast('Erro: '+error.message,true);return;}toast('Regra salva ✅');feeRulesModal();};
 window.feeRuleDelete=async id=>{if(!await uiConfirm('Excluir esta regra de taxa?',{danger:true,okText:'Excluir'}))return;const {error}=await sb.rpc('erp_payment_fee_rule_delete',{p_id:id});if(error){toast('Erro: '+error.message,true);return;}feeRulesModal();};
-window.paymentSettlement=id=>{const p=(window.PAYMENT_PROFIT||[]).find(x=>x.payment_id===id);if(!p)return;modal(`<div class="m-head"><h3>Registrar depósito · venda #${esc(p.numero||'')}</h3><button data-modal-close>✕</button></div><div class="m-body"><p class="muted">Use o valor efetivamente creditado no banco/adquirente.</p><div class="grid2"><div class="field"><label class="lbl">Data do depósito</label><input id="psDate" type="date" class="in" value="${hojeISO()}"></div><div class="field"><label class="lbl">Bruto</label><input id="psGross" class="in" value="${p.gross}"></div></div><div class="grid2"><div class="field"><label class="lbl">Taxas cobradas</label><input id="psFee" class="in" value="${p.expected_fee||0}"></div><div class="field"><label class="lbl">Líquido depositado</label><input id="psNet" class="in" value="${p.expected_net||p.gross}"></div></div><div class="field"><label class="lbl">Observação</label><input id="psNotes" class="in"></div></div><div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="paymentSettlementSave('${id}')">Salvar depósito</button></div>`);};
+window.paymentSettlement=id=>{const p=(window.PAYMENT_PROFIT||[]).find(x=>x.payment_id===id);if(!p)return;modal(`<div class="m-head"><h3>Registrar depósito · venda #${esc(p.numero||'')}</h3><button data-modal-close>✕</button></div><div class="m-body"><p class="muted">Use o valor efetivamente creditado no banco/adquirente.</p><div class="grid2"><div class="field"><label class="lbl" for="psDate">Data do depósito</label><input id="psDate" type="date" class="in" value="${hojeISO()}"></div><div class="field"><label class="lbl" for="psGross">Bruto</label><input id="psGross" class="in" value="${p.gross}"></div></div><div class="grid2"><div class="field"><label class="lbl" for="psFee">Taxas cobradas</label><input id="psFee" class="in" value="${p.expected_fee||0}"></div><div class="field"><label class="lbl" for="psNet">Líquido depositado</label><input id="psNet" class="in" value="${p.expected_net||p.gross}"></div></div><div class="field"><label class="lbl" for="psNotes">Observação</label><input id="psNotes" class="in"></div></div><div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="paymentSettlementSave('${id}')">Salvar depósito</button></div>`);};
 window.paymentSettlementSave=async id=>{const {error}=await sb.rpc('erp_payment_settlement_record',{p_payment:id,p_date:$('#psDate').value,p_gross:num($('#psGross').value)||0,p_fee:num($('#psFee').value)||0,p_net:num($('#psNet').value)||0,p_notes:$('#psNotes').value||null});if(error){toast('Erro: '+error.message,true);return;}closeModal();toast('Depósito conciliado ✅');loadReport();};
 
 // ======================= PRODUTOS ENCALHADOS =======================
@@ -6515,12 +6618,12 @@ window.userEdit = (id)=>{
   modal('<div class="m-head"><h3>Acessos de '+esc(u.nome||'')+'</h3><button data-modal-close>✕</button></div>'
     +'<div class="m-body">'
       +'<div class="grid2">'
-        +'<div class="field"><label class="lbl">Nome</label><input id="usNome" class="in" value="'+esc(u.nome||'')+'"></div>'
-        +'<div class="field"><label class="lbl">Papel</label><select id="usPapel" class="in">'
+        +'<div class="field"><label class="lbl" for="usNome">Nome</label><input id="usNome" class="in" value="'+esc(u.nome||'')+'"></div>'
+        +'<div class="field"><label class="lbl" for="usPapel">Papel</label><select id="usPapel" class="in">'
           +['admin','operador','motoboy'].map(x=>'<option value="'+x+'"'+(u.papel===x?' selected':'')+'>'+x+'</option>').join('')
         +'</select></div>'
-        +'<div class="field"><label class="lbl">Loja</label><select id="usLoja" class="in">'+lojaOpts+'</select></div>'
-        +'<div class="field"><label class="lbl">Situação</label><select id="usAtivo" class="in">'
+        +'<div class="field"><label class="lbl" for="usLoja">Loja</label><select id="usLoja" class="in">'+lojaOpts+'</select></div>'
+        +'<div class="field"><label class="lbl" for="usAtivo">Situação</label><select id="usAtivo" class="in">'
           +'<option value="1"'+(u.ativo?' selected':'')+'>Ativo</option>'
           +'<option value="0"'+(u.ativo?'':' selected')+'>Desativado</option></select></div>'
       +'</div>'
@@ -6552,7 +6655,7 @@ window.userSetPassword = (id)=>{
   modal('<div class="m-head"><h3>Nova senha · '+esc(u.nome||'operador')+'</h3><button data-modal-close>✕</button></div>'
     +'<div class="m-body">'
       +'<p class="muted" style="font-size:13px;margin:0 0 10px">A senha entra em vigor na hora. Avise a pessoa em particular — não envie por canais abertos.</p>'
-      +'<div class="field"><label class="lbl">Nova senha (mín. 6)</label><input id="npPass" class="in" type="text" autocomplete="off" placeholder="ex.: caixa2026"></div>'
+      +'<div class="field"><label class="lbl" for="npPass">Nova senha (mín. 6)</label><input id="npPass" class="in" type="text" autocomplete="off" placeholder="ex.: caixa2026"></div>'
     +'</div>'
     +'<div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button>'
       +'<button class="btn" id="npGo" data-onclick="userSetPasswordGo(\'' + id + '\')">Salvar senha</button></div>');
@@ -6587,13 +6690,13 @@ window.userCreate = ()=>{
   modal('<div class="m-head"><h3>Novo operador</h3><button data-modal-close>✕</button></div>'
     +'<div class="m-body">'
       +'<div class="grid2">'
-        +'<div class="field"><label class="lbl">Nome</label><input id="ncNome" class="in" placeholder="Nome da pessoa"></div>'
-        +'<div class="field"><label class="lbl">E-mail (login)</label><input id="ncEmail" class="in" type="email" autocomplete="off" placeholder="pessoa@loja.com"></div>'
-        +'<div class="field"><label class="lbl">Senha (mín. 6)</label><input id="ncPass" class="in" type="text" autocomplete="off" placeholder="ex.: caixa2026"></div>'
-        +'<div class="field"><label class="lbl">Papel</label><select id="ncPapel" class="in">'
+        +'<div class="field"><label class="lbl" for="ncNome">Nome</label><input id="ncNome" class="in" placeholder="Nome da pessoa"></div>'
+        +'<div class="field"><label class="lbl" for="ncEmail">E-mail (login)</label><input id="ncEmail" class="in" type="email" autocomplete="off" placeholder="pessoa@loja.com"></div>'
+        +'<div class="field"><label class="lbl" for="ncPass">Senha (mín. 6)</label><input id="ncPass" class="in" type="text" autocomplete="off" placeholder="ex.: caixa2026"></div>'
+        +'<div class="field"><label class="lbl" for="ncPapel">Papel</label><select id="ncPapel" class="in">'
           +['operador','motoboy','admin'].map(x=>'<option value="'+x+'">'+x+'</option>').join('')
         +'</select></div>'
-        +'<div class="field"><label class="lbl">Loja</label><select id="ncLoja" class="in">'+lojaOpts+'</select></div>'
+        +'<div class="field"><label class="lbl" for="ncLoja">Loja</label><select id="ncLoja" class="in">'+lojaOpts+'</select></div>'
       +'</div>'
       +'<p class="muted" style="font-size:12.5px;margin:6px 0 0">A conta entra na hora com esse e-mail e senha. O admin sempre tem acesso total; as marcações abaixo valem para operador e motoboy.</p>'
       +'<div id="ncPerms" style="margin-top:12px">'
@@ -6702,16 +6805,16 @@ window.storeForm = (s={})=>{
   const hasPt = s.lat!=null && s.lng!=null;
   modal(`<div class="m-head"><h3>${s.id?'Editar':'Nova'} loja</h3><button data-modal-close>×</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Nome / Razão social *</label><input id="stNome" class="in" value="${esc(s.nome||'')}"></div>
+      <div class="field"><label class="lbl" for="stNome">Nome / Razão social *</label><input id="stNome" class="in" value="${esc(s.nome||'')}"></div>
       <div class="grid2">
-        <div class="field"><label class="lbl">CNPJ</label><input id="stCnpj" class="in" value="${esc(s.cnpj||'')}"></div>
-        <div class="field"><label class="lbl">Inscrição Estadual</label><input id="stIe" class="in" value="${esc(s.ie||'')}"></div>
-        <div class="field"><label class="lbl">Regime</label><select id="stReg" class="in">
+        <div class="field"><label class="lbl" for="stCnpj">CNPJ</label><input id="stCnpj" class="in" value="${esc(s.cnpj||'')}"></div>
+        <div class="field"><label class="lbl" for="stIe">Inscrição Estadual</label><input id="stIe" class="in" value="${esc(s.ie||'')}"></div>
+        <div class="field"><label class="lbl" for="stReg">Regime</label><select id="stReg" class="in">
           ${['simples','presumido','real','mei'].map(r=>`<option ${s.regime===r?'selected':''}>${r}</option>`).join('')}</select></div>
-        <div class="field"><label class="lbl">Ambiente fiscal</label><select id="stAmb" class="in">
+        <div class="field"><label class="lbl" for="stAmb">Ambiente fiscal</label><select id="stAmb" class="in">
           <option value="homologacao" ${s.ambiente_fiscal!=='producao'?'selected':''}>homologação</option>
           <option value="producao" ${s.ambiente_fiscal==='producao'?'selected':''}>produção</option></select></div>
-        <div class="field"><label class="lbl">Situação</label><select id="stAtivo" class="in">
+        <div class="field"><label class="lbl" for="stAtivo">Situação</label><select id="stAtivo" class="in">
           <option value="true" ${s.ativo!==false?'selected':''}>ativa (aparece em todas as telas)</option>
           <option value="false" ${s.ativo===false?'selected':''}>inativa (some das telas)</option></select></div>
       </div>
@@ -6724,12 +6827,12 @@ window.storeForm = (s={})=>{
               data-oninput="maskCep(this)" data-onblur="storeBuscaCepIfComplete(this)">
             <button type="button" class="btn ghost sm" data-onclick="storeBuscaCep()">Buscar CEP</button>
           </div></div>
-        <div class="field"><label class="lbl">Telefone</label><input id="stTel" class="in" value="${esc(s.telefone||'')}"></div>
-        <div class="field" style="grid-column:1/-1"><label class="lbl">Endereço (logradouro)</label><input id="stEnd" class="in" value="${esc(s.endereco||'')}"></div>
-        <div class="field"><label class="lbl">Número</label><input id="stNum" class="in" value="${esc(s.numero||'')}"></div>
-        <div class="field"><label class="lbl">Bairro</label><input id="stBairro" class="in" value="${esc(s.bairro||'')}"></div>
-        <div class="field"><label class="lbl">Município</label><input id="stMun" class="in" value="${esc(s.municipio||'')}"></div>
-        <div class="field"><label class="lbl">UF</label><input id="stUf" class="in" value="${esc(s.uf||'')}" maxlength="2"></div>
+        <div class="field"><label class="lbl" for="stTel">Telefone</label><input id="stTel" class="in" value="${esc(s.telefone||'')}"></div>
+        <div class="field" style="grid-column:1/-1"><label class="lbl" for="stEnd">Endereço (logradouro)</label><input id="stEnd" class="in" value="${esc(s.endereco||'')}"></div>
+        <div class="field"><label class="lbl" for="stNum">Número</label><input id="stNum" class="in" value="${esc(s.numero||'')}"></div>
+        <div class="field"><label class="lbl" for="stBairro">Bairro</label><input id="stBairro" class="in" value="${esc(s.bairro||'')}"></div>
+        <div class="field"><label class="lbl" for="stMun">Município</label><input id="stMun" class="in" value="${esc(s.municipio||'')}"></div>
+        <div class="field"><label class="lbl" for="stUf">UF</label><input id="stUf" class="in" value="${esc(s.uf||'')}" maxlength="2"></div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;margin:6px 0">
         <button type="button" class="btn ghost sm" data-onclick="storeGeo(true)">🔎 Localizar no mapa</button>
@@ -7637,7 +7740,7 @@ window.delivStatus=async (id,st)=>{
 };
 window.delivDone=id=>{
   modal(`<div class="m-head"><h3>Confirmar entrega</h3><button data-modal-close>✕</button></div>
-    <div class="m-body"><label class="lbl">Forma de pagamento recebida</label>
+    <div class="m-body"><label class="lbl" for="dvPay">Forma de pagamento recebida</label>
       <select id="dvPay" class="in"><option value="dinheiro">Dinheiro</option><option value="pix">PIX</option><option value="debito">Cartão débito</option><option value="credito">Cartão crédito</option></select></div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="delivConfirm('${id}')">Marcar entregue</button></div>`);
 };
@@ -8128,9 +8231,9 @@ async function purchaseFlowModal(){
   const c=PURCHASE_FLOW.config;
   modal(`<div class="m-head"><h3>Regras do fluxo de compras</h3><button data-modal-close>✕</button></div>
     <div class="m-body"><p class="muted">As regras complementam o Pedido inteligente sem alterar o fluxo de vendas.</p>
-      <div class="grid2"><div class="field"><label class="lbl">Aprovação automática até (R$)</label><input id="pwAuto" class="in" inputmode="decimal" value="${num(c.auto_approval_limit).toFixed(2).replace('.',',')}"></div>
-      <div class="field"><label class="lbl">Alerta de aumento de custo (%)</label><input id="pwAlert" class="in" inputmode="decimal" value="${num(c.price_increase_alert_percent).toFixed(2).replace('.',',')}"></div>
-      <div class="field"><label class="lbl">Prioridade padrão</label><select id="pwPriority" class="in">${['baixa','normal','alta','urgente'].map(x=>`<option value="${x}" ${x===c.default_priority?'selected':''}>${x}</option>`).join('')}</select></div></div>
+      <div class="grid2"><div class="field"><label class="lbl" for="pwAuto">Aprovação automática até (R$)</label><input id="pwAuto" class="in" inputmode="decimal" value="${num(c.auto_approval_limit).toFixed(2).replace('.',',')}"></div>
+      <div class="field"><label class="lbl" for="pwAlert">Alerta de aumento de custo (%)</label><input id="pwAlert" class="in" inputmode="decimal" value="${num(c.price_increase_alert_percent).toFixed(2).replace('.',',')}"></div>
+      <div class="field"><label class="lbl" for="pwPriority">Prioridade padrão</label><select id="pwPriority" class="in">${['baixa','normal','alta','urgente'].map(x=>`<option value="${x}" ${x===c.default_priority?'selected':''}>${x}</option>`).join('')}</select></div></div>
       <div class="tbl-wrap" style="margin-top:12px"><table><thead><tr><th>Alertas recentes de custo</th><th class="r">Anterior</th><th class="r">Atual</th><th class="r">Aumento</th></tr></thead><tbody>${alerts||'<tr><td colspan="4" class="muted" style="text-align:center">Nenhum aumento acima da regra.</td></tr>'}</tbody></table></div>
     </div><div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="purchaseFlowSave()">Salvar regras</button></div>`,'wide');
 }
@@ -8396,11 +8499,11 @@ window.poDraftEdit=async id=>{
     <div class="tbl-wrap"><table><thead><tr><th>Produto</th><th class="r">Quantidade</th><th class="r">Custo</th></tr></thead><tbody>
     ${(d.itens||[]).map(i=>`<tr><td>${esc(i.descricao||'')}</td><td class="r"><input class="in" data-draft-pid="${i.product_id}" value="${+i.qtd_pedida||0}" style="width:85px;text-align:right"></td><td class="r"><input class="in" data-draft-cost="${i.product_id}" value="${+i.custo_unit||0}" style="width:100px;text-align:right"></td></tr>`).join('')}
     </tbody></table></div>
-    <div class="grid2" style="margin-top:12px"><div class="field"><label class="lbl">Solicitante</label><input id="poMetaBuyer" class="in" value="${esc(flow.buyer_name||(ME&&(ME.nome||ME.name))||'')}"></div>
-    <div class="field"><label class="lbl">Prioridade</label><select id="poMetaPriority" class="in">${['baixa','normal','alta','urgente'].map(x=>`<option value="${x}" ${x===(flow.priority||PURCHASE_FLOW.config.default_priority)?'selected':''}>${x}</option>`).join('')}</select></div>
-    <div class="field"><label class="lbl">Entrega desejada</label><input id="poMetaDelivery" class="in" type="date" value="${esc(flow.delivery_on||'')}"></div>
-    <div class="field"><label class="lbl">Parcelas</label><input id="poMetaInstallments" class="in" inputmode="numeric" value="${flow.installments||1}"></div></div>
-    <div class="field"><label class="lbl">Observações internas</label><textarea id="poMetaNotes" class="in" rows="2">${esc(flow.notes||'')}</textarea></div>
+    <div class="grid2" style="margin-top:12px"><div class="field"><label class="lbl" for="poMetaBuyer">Solicitante</label><input id="poMetaBuyer" class="in" value="${esc(flow.buyer_name||(ME&&(ME.nome||ME.name))||'')}"></div>
+    <div class="field"><label class="lbl" for="poMetaPriority">Prioridade</label><select id="poMetaPriority" class="in">${['baixa','normal','alta','urgente'].map(x=>`<option value="${x}" ${x===(flow.priority||PURCHASE_FLOW.config.default_priority)?'selected':''}>${x}</option>`).join('')}</select></div>
+    <div class="field"><label class="lbl" for="poMetaDelivery">Entrega desejada</label><input id="poMetaDelivery" class="in" type="date" value="${esc(flow.delivery_on||'')}"></div>
+    <div class="field"><label class="lbl" for="poMetaInstallments">Parcelas</label><input id="poMetaInstallments" class="in" inputmode="numeric" value="${flow.installments||1}"></div></div>
+    <div class="field"><label class="lbl" for="poMetaNotes">Observações internas</label><textarea id="poMetaNotes" class="in" rows="2">${esc(flow.notes||'')}</textarea></div>
     </div><div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="poDraftSave('${id}')">Salvar revisão</button></div>`,'wide');
 };
 window.poDraftSave=async id=>{
@@ -8441,9 +8544,9 @@ async function cashflowModal(dias){
   modal(`<div class="m-head"><h3>📈 Fluxo de caixa projetado</h3><button data-modal-close>×</button></div>
     <div class="m-body">
       <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
-        <div class="field" style="margin:0"><label class="lbl">De</label><input id="cfIni" type="date" class="in" style="max-width:150px" value="${window._cfRange.ini}"></div>
-        <div class="field" style="margin:0"><label class="lbl">Até</label><input id="cfFim" type="date" class="in" style="max-width:150px" value="${window._cfRange.fim}"></div>
-        <div class="field" style="margin:0"><label class="lbl">Saldo inicial (R$)</label><input id="cfOpen" class="in" inputmode="decimal" style="max-width:130px" value="0"></div>
+        <div class="field" style="margin:0"><label class="lbl" for="cfIni">De</label><input id="cfIni" type="date" class="in" style="max-width:150px" value="${window._cfRange.ini}"></div>
+        <div class="field" style="margin:0"><label class="lbl" for="cfFim">Até</label><input id="cfFim" type="date" class="in" style="max-width:150px" value="${window._cfRange.fim}"></div>
+        <div class="field" style="margin:0"><label class="lbl" for="cfOpen">Saldo inicial (R$)</label><input id="cfOpen" class="in" inputmode="decimal" style="max-width:130px" value="0"></div>
         <button class="btn" data-onclick="cashflowRun()">Atualizar</button>
       </div>
       <div id="cfBody"><p class="muted" style="padding:16px">Calculando…</p></div>
@@ -8493,8 +8596,8 @@ async function dreModal(){
   modal(`<div class="m-head"><h3>📊 DRE · resultado do período</h3><button data-modal-close>×</button></div>
     <div class="m-body">
       <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
-        <div class="field" style="margin:0"><label class="lbl">De</label><input id="dreIni" type="date" class="in" style="max-width:150px" value="${r.ini}"></div>
-        <div class="field" style="margin:0"><label class="lbl">Até</label><input id="dreFim" type="date" class="in" style="max-width:150px" value="${r.fim}"></div>
+        <div class="field" style="margin:0"><label class="lbl" for="dreIni">De</label><input id="dreIni" type="date" class="in" style="max-width:150px" value="${r.ini}"></div>
+        <div class="field" style="margin:0"><label class="lbl" for="dreFim">Até</label><input id="dreFim" type="date" class="in" style="max-width:150px" value="${r.fim}"></div>
         <button class="btn" data-onclick="dreRun()">Atualizar</button>
       </div>
       <div id="dreBody"><p class="muted" style="padding:16px">Calculando…</p></div>
@@ -8789,15 +8892,15 @@ window.payableForm = (id)=>{
     const venc = r.vencimento || new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
     modal(`<div class="m-head"><h3>${id?'Editar':'Nova'} conta a pagar</h3><button data-modal-close>×</button></div>
       <div class="m-body">
-        <div class="field"><label class="lbl">Fornecedor</label><select id="pyForn" class="in" ${id?'disabled':''}>${so}</select></div>
-        <div class="field"><label class="lbl">Loja devedora</label><select id="pyStore" class="in" ${id?'disabled':''}>${lo}</select></div>
-        <div class="field"><label class="lbl">Descrição</label><input id="pyDesc" class="in" value="${esc(r.descricao||'')}"></div>
+        <div class="field"><label class="lbl" for="pyForn">Fornecedor</label><select id="pyForn" class="in" ${id?'disabled':''}>${so}</select></div>
+        <div class="field"><label class="lbl" for="pyStore">Loja devedora</label><select id="pyStore" class="in" ${id?'disabled':''}>${lo}</select></div>
+        <div class="field"><label class="lbl" for="pyDesc">Descrição</label><input id="pyDesc" class="in" value="${esc(r.descricao||'')}"></div>
         <div class="grid2">
-          <div class="field"><label class="lbl">Valor</label><input id="pyVal" class="in" inputmode="decimal" value="${r.valor!=null?r.valor:''}"></div>
-          <div class="field"><label class="lbl">Vencimento</label><input id="pyVenc" class="in" type="date" value="${venc}"></div>
-          <div class="field"><label class="lbl">🏦 Conta bancária</label><input id="pyConta" class="in" value="${esc(r.conta_bancaria||'')}" placeholder="ex: Itaú 1234-5 / Caixa loja"></div>
-          <div class="field"><label class="lbl">🏷️ Categoria</label><select id="pyCat" class="in"><option value="">— nenhuma —</option>${catOptions(r.categoria)}</select></div>
-          <div class="field"><label class="lbl">🎯 Centro de custo</label><select id="pyCC" class="in"><option value="">— nenhum —</option>${ccOptions(r.centro_custo)}</select></div>
+          <div class="field"><label class="lbl" for="pyVal">Valor</label><input id="pyVal" class="in" inputmode="decimal" value="${r.valor!=null?r.valor:''}"></div>
+          <div class="field"><label class="lbl" for="pyVenc">Vencimento</label><input id="pyVenc" class="in" type="date" value="${venc}"></div>
+          <div class="field"><label class="lbl" for="pyConta">🏦 Conta bancária</label><input id="pyConta" class="in" value="${esc(r.conta_bancaria||'')}" placeholder="ex: Itaú 1234-5 / Caixa loja"></div>
+          <div class="field"><label class="lbl" for="pyCat">🏷️ Categoria</label><select id="pyCat" class="in"><option value="">— nenhuma —</option>${catOptions(r.categoria)}</select></div>
+          <div class="field"><label class="lbl" for="pyCC">🎯 Centro de custo</label><select id="pyCC" class="in"><option value="">— nenhum —</option>${ccOptions(r.centro_custo)}</select></div>
         </div>
         ${id?'':`
         <div class="field" style="margin-top:2px;padding-top:8px;border-top:1px solid var(--line)">
@@ -8806,8 +8909,8 @@ window.payableForm = (id)=>{
             🔁 Repetir automaticamente (conta fixa: aluguel, fornecedor fixo…)</label>
         </div>
         <div id="pyRecOpts" class="grid2" style="display:none">
-          <div class="field"><label class="lbl">A cada (meses)</label><input id="pyRecMeses" class="in" type="number" min="1" value="1"></div>
-          <div class="field"><label class="lbl">Repetir até (opcional)</label><input id="pyRecFim" class="in" type="date"></div>
+          <div class="field"><label class="lbl" for="pyRecMeses">A cada (meses)</label><input id="pyRecMeses" class="in" type="number" min="1" value="1"></div>
+          <div class="field"><label class="lbl" for="pyRecFim">Repetir até (opcional)</label><input id="pyRecFim" class="in" type="date"></div>
           <p class="muted" style="grid-column:1/-1;font-size:12px;margin:0">As próximas contas são criadas sozinhas (todo mês, até 45 dias à frente). Você pode parar quando quiser no detalhe da conta.</p>
         </div>`}
       </div>
@@ -8841,15 +8944,15 @@ window.payPayable = (id)=>{
       <p style="font-family:Fredoka;font-size:26px;font-weight:700;margin:0 0 4px">${BRL(r.valor)}</p>
       <p class="muted" style="margin:0 0 10px">Vencimento ${fmtDate(r.vencimento)}${atraso>0?` · <span class="neg">${atraso} dia(s) em atraso</span>`:''}</p>
       <div class="grid2">
-        <div class="field"><label class="lbl">Data do pagamento</label><input id="ppData" class="in" type="date" value="${hoje}"></div>
-        <div class="field"><label class="lbl">Juros / multa (R$)</label><input id="ppJuros" class="in" inputmode="decimal" value="0" data-oninput="ppTot()"></div>
-        <div class="field"><label class="lbl">Forma</label><select id="ppForma" class="in">
+        <div class="field"><label class="lbl" for="ppData">Data do pagamento</label><input id="ppData" class="in" type="date" value="${hoje}"></div>
+        <div class="field"><label class="lbl" for="ppJuros">Juros / multa (R$)</label><input id="ppJuros" class="in" inputmode="decimal" value="0" data-oninput="ppTot()"></div>
+        <div class="field"><label class="lbl" for="ppForma">Forma</label><select id="ppForma" class="in">
           <option value="dinheiro">💵 Dinheiro</option><option value="pix">📱 PIX</option>
           <option value="transferencia">🏦 Transferência</option><option value="boleto">🧾 Boleto</option>
           <option value="debito">💳 Débito</option><option value="credito">💳 Crédito</option></select></div>
-        <div class="field"><label class="lbl">🏦 Conta bancária</label><input id="ppConta" class="in" value="${esc(r.conta_bancaria||'')}" placeholder="de onde saiu o dinheiro"></div>
-        <div class="field"><label class="lbl">🏷️ Categoria</label><select id="ppCat" class="in"><option value="">— manter —</option>${catOptions(r.categoria)}</select></div>
-        <div class="field"><label class="lbl">🎯 Centro de custo</label><select id="ppCC" class="in"><option value="">— nenhum —</option>${ccOptions(r.centro_custo)}</select></div>
+        <div class="field"><label class="lbl" for="ppConta">🏦 Conta bancária</label><input id="ppConta" class="in" value="${esc(r.conta_bancaria||'')}" placeholder="de onde saiu o dinheiro"></div>
+        <div class="field"><label class="lbl" for="ppCat">🏷️ Categoria</label><select id="ppCat" class="in"><option value="">— manter —</option>${catOptions(r.categoria)}</select></div>
+        <div class="field"><label class="lbl" for="ppCC">🎯 Centro de custo</label><select id="ppCC" class="in"><option value="">— nenhum —</option>${ccOptions(r.centro_custo)}</select></div>
       </div>
       <div class="sum" style="border-radius:12px;margin-top:6px">
         <div class="l"><span>Valor original</span><b>${BRL(r.valor)}</b></div>
@@ -8886,11 +8989,11 @@ async function suppliersModal(){
         <tbody>${(data||[]).map(s=>`<tr class="clickrow" data-onclick="supplierEdit('${s.id}')"><td><b>${esc(s.nome)}</b></td><td>${esc(s.cnpj||'—')}</td><td>${esc(s.telefone||'—')}</td><td>${s.lead_time_days||7} dias</td></tr>`).join('')||'<tr><td colspan="4" class="muted">Nenhum.</td></tr>'}</tbody></table></div>
       <input id="suId" type="hidden">
       <div class="grid2">
-        <div class="field"><label class="lbl">Nome *</label><input id="suNome" class="in"></div>
-        <div class="field"><label class="lbl">CNPJ</label><input id="suCnpj" class="in"></div>
-        <div class="field"><label class="lbl">Telefone</label><input id="suFone" class="in"></div>
-        <div class="field"><label class="lbl">E-mail</label><input id="suEmail" class="in"></div>
-        <div class="field"><label class="lbl">Prazo padrão de entrega (dias)</label><input id="suLead" class="in" value="7" inputmode="numeric"></div>
+        <div class="field"><label class="lbl" for="suNome">Nome *</label><input id="suNome" class="in"></div>
+        <div class="field"><label class="lbl" for="suCnpj">CNPJ</label><input id="suCnpj" class="in"></div>
+        <div class="field"><label class="lbl" for="suFone">Telefone</label><input id="suFone" class="in"></div>
+        <div class="field"><label class="lbl" for="suEmail">E-mail</label><input id="suEmail" class="in"></div>
+        <div class="field"><label class="lbl" for="suLead">Prazo padrão de entrega (dias)</label><input id="suLead" class="in" value="7" inputmode="numeric"></div>
       </div>
     </div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Fechar</button>
@@ -9100,7 +9203,7 @@ window.nfeLink=k=>{
   window._nfeIdx=k;
   modal(`<div class="m-head"><h3>Vincular “${esc(it.nome)}”</h3><button data-onclick="nfeBack()">✕</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Buscar produto no estoque (nome, SKU ou código de barras)</label>
+      <div class="field"><label class="lbl" for="nfqSearch">Buscar produto no estoque (nome, SKU ou código de barras)</label>
         <input id="nfqSearch" class="in" placeholder="digite para buscar…" autocomplete="off"></div>
       <div id="nfqRes" class="tbl-wrap" style="max-height:300px;overflow:auto"></div>
     </div>
@@ -9238,14 +9341,14 @@ window.termForm = (t)=>{
   modal(`
     <div class="m-head"><h3>${edit?'Editar':'Nova'} maquininha · Mercado Pago Point</h3><button data-modal-close>×</button></div>
     <div class="m-body">
-      <div class="field"><label class="lbl">Nome *</label><input id="tfNome" class="in" placeholder="Ex: Caixa 1" value="${edit?esc(t.nome||''):''}"></div>
-      <div class="field"><label class="lbl">Loja *</label>
+      <div class="field"><label class="lbl" for="tfNome">Nome *</label><input id="tfNome" class="in" placeholder="Ex: Caixa 1" value="${edit?esc(t.nome||''):''}"></div>
+      <div class="field"><label class="lbl" for="tfStore">Loja *</label>
         <select id="tfStore" class="in">${storeOpts||'<option value="">(nenhuma loja ativa)</option>'}</select>
         <p class="muted" style="font-size:12px;margin-top:4px">Cada maquininha cobra pela <b>conta Mercado Pago da sua loja</b>. Sem loja definida, usa a conta padrão do sistema.</p></div>
-      <div class="field"><label class="lbl">Device ID do Point</label>
+      <div class="field"><label class="lbl" for="tfDevice">Device ID do Point</label>
         <input id="tfDevice" class="in" placeholder="ex.: PAX_A910__SMARTPOS1234567890" value="${edit?esc(t.provider_terminal_id||''):''}">
         <p class="muted" style="font-size:12px;margin-top:4px">No aparelho, ative o modo <b>PDV/Integrado</b> e copie o Device ID no app do vendedor do Mercado Pago. Deixe em branco para usar o Device ID global (Config → Mercado Pago Point).</p></div>
-      <div class="field"><label class="lbl">Serial (opcional)</label><input id="tfSerial" class="in" value="${edit?esc(t.serial||''):''}"></div>
+      <div class="field"><label class="lbl" for="tfSerial">Serial (opcional)</label><input id="tfSerial" class="in" value="${edit?esc(t.serial||''):''}"></div>
     </div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button>
       <button class="btn" data-onclick="saveTerm(${edit?`'${t.id}'`:''})">${edit?'Salvar':'Criar'}</button></div>`);
@@ -9361,15 +9464,15 @@ function opsLotModal(){
   const products=PRODUCTS.map(p=>`<option value="${p.id}">${esc(p.nome||p.name)} · ${esc(p.sku||'sem SKU')}</option>`).join('');
   const suppliers=SUPPLIERS.map(s=>`<option value="${s.id}">${esc(s.nome)}</option>`).join('');
   modal(`<div class="m-head"><h3>Receber lote</h3><button data-modal-close>×</button></div><div class="m-body">
-    <div class="grid2"><div class="field"><label class="lbl">Loja</label><select id="olStore" class="in">${stores}</select></div>
-    <div class="field"><label class="lbl">Produto</label><select id="olProduct" class="in">${products}</select></div>
-    <div class="field"><label class="lbl">Fornecedor</label><select id="olSupplier" class="in"><option value="">—</option>${suppliers}</select></div>
-    <div class="field"><label class="lbl">Código do lote *</label><input id="olCode" class="in"></div>
-    <div class="field"><label class="lbl">Quantidade *</label><input id="olQty" class="in" inputmode="decimal"></div>
-    <div class="field"><label class="lbl">Custo unitário</label><input id="olCost" class="in" inputmode="decimal"></div>
-    <div class="field"><label class="lbl">Fabricação</label><input id="olMade" class="in" type="date"></div>
-    <div class="field"><label class="lbl">Validade</label><input id="olExpiry" class="in" type="date"></div></div>
-    <div class="field"><label class="lbl">Chave da NF-e</label><input id="olInvoice" class="in"></div></div>
+    <div class="grid2"><div class="field"><label class="lbl" for="olStore">Loja</label><select id="olStore" class="in">${stores}</select></div>
+    <div class="field"><label class="lbl" for="olProduct">Produto</label><select id="olProduct" class="in">${products}</select></div>
+    <div class="field"><label class="lbl" for="olSupplier">Fornecedor</label><select id="olSupplier" class="in"><option value="">—</option>${suppliers}</select></div>
+    <div class="field"><label class="lbl" for="olCode">Código do lote *</label><input id="olCode" class="in"></div>
+    <div class="field"><label class="lbl" for="olQty">Quantidade *</label><input id="olQty" class="in" inputmode="decimal"></div>
+    <div class="field"><label class="lbl" for="olCost">Custo unitário</label><input id="olCost" class="in" inputmode="decimal"></div>
+    <div class="field"><label class="lbl" for="olMade">Fabricação</label><input id="olMade" class="in" type="date"></div>
+    <div class="field"><label class="lbl" for="olExpiry">Validade</label><input id="olExpiry" class="in" type="date"></div></div>
+    <div class="field"><label class="lbl" for="olInvoice">Chave da NF-e</label><input id="olInvoice" class="in"></div></div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="opsSaveLot()">Receber</button></div>`);
 }
 async function opsSaveLot(){
@@ -9386,16 +9489,16 @@ async function opsSubscriptionModal(){
   const stores=STORES.map(s=>`<option value="${s.id}" ${s.id===CURRENT_STORE?'selected':''}>${esc(s.nome)}</option>`).join('');
   const next=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
   modal(`<div class="m-head"><h3>Nova assinatura</h3><button data-modal-close>×</button></div><div class="m-body">
-    <div class="grid2"><div class="field"><label class="lbl">Cliente</label><select id="osCustomer" class="in">${customers}</select></div>
-    <div class="field"><label class="lbl">Loja</label><select id="osStore" class="in">${stores}</select></div>
-    <div class="field"><label class="lbl">Plano</label><select id="osPlan" class="in"><option value="">Personalizado</option>${(plans||[]).map(x=>`<option value="${x.id}" data-days="${x.interval_days}" data-disc="${x.discount_pct}">${esc(x.name)}</option>`).join('')}</select></div>
-    <div class="field"><label class="lbl">Produto</label><select id="osProduct" class="in">${products}</select></div>
-    <div class="field"><label class="lbl">Quantidade</label><input id="osQty" class="in" value="1" inputmode="decimal"></div>
-    <div class="field"><label class="lbl">A cada (dias)</label><input id="osDays" class="in" value="30" inputmode="numeric"></div>
-    <div class="field"><label class="lbl">Próximo ciclo</label><input id="osNext" class="in" type="date" value="${next}"></div>
-    <div class="field"><label class="lbl">Pagamento</label><select id="osPay" class="in"><option value="pix">PIX</option><option value="card_link">Link de cartão</option><option value="on_delivery">Na entrega</option><option value="cash">Dinheiro</option></select></div>
-    <div class="field"><label class="lbl">Entrega</label><select id="osDelivery" class="in"><option value="pickup">Retirada</option><option value="delivery">Entrega</option></select></div>
-    <div class="field"><label class="lbl">Desconto %</label><input id="osDisc" class="in" value="0" inputmode="decimal"></div></div></div>
+    <div class="grid2"><div class="field"><label class="lbl" for="osCustomer">Cliente</label><select id="osCustomer" class="in">${customers}</select></div>
+    <div class="field"><label class="lbl" for="osStore">Loja</label><select id="osStore" class="in">${stores}</select></div>
+    <div class="field"><label class="lbl" for="osPlan">Plano</label><select id="osPlan" class="in"><option value="">Personalizado</option>${(plans||[]).map(x=>`<option value="${x.id}" data-days="${x.interval_days}" data-disc="${x.discount_pct}">${esc(x.name)}</option>`).join('')}</select></div>
+    <div class="field"><label class="lbl" for="osProduct">Produto</label><select id="osProduct" class="in">${products}</select></div>
+    <div class="field"><label class="lbl" for="osQty">Quantidade</label><input id="osQty" class="in" value="1" inputmode="decimal"></div>
+    <div class="field"><label class="lbl" for="osDays">A cada (dias)</label><input id="osDays" class="in" value="30" inputmode="numeric"></div>
+    <div class="field"><label class="lbl" for="osNext">Próximo ciclo</label><input id="osNext" class="in" type="date" value="${next}"></div>
+    <div class="field"><label class="lbl" for="osPay">Pagamento</label><select id="osPay" class="in"><option value="pix">PIX</option><option value="card_link">Link de cartão</option><option value="on_delivery">Na entrega</option><option value="cash">Dinheiro</option></select></div>
+    <div class="field"><label class="lbl" for="osDelivery">Entrega</label><select id="osDelivery" class="in"><option value="pickup">Retirada</option><option value="delivery">Entrega</option></select></div>
+    <div class="field"><label class="lbl" for="osDisc">Desconto %</label><input id="osDisc" class="in" value="0" inputmode="decimal"></div></div></div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="opsSaveSubscription()">Ativar</button></div>`);
   $('#osPlan').onchange=e=>{const o=e.target.selectedOptions[0];if(o&&o.dataset.days)$('#osDays').value=o.dataset.days;if(o&&o.dataset.disc)$('#osDisc').value=o.dataset.disc;};
 }
@@ -9423,13 +9526,13 @@ window.opsPlanRender=function(editId){
       <b>${ed?'✏️ Editar plano':'➕ Novo plano'}</b>
       <input type="hidden" id="opId" value="${ed?ed.id:''}">
       <div class="grid2" style="margin-top:8px">
-        <div class="field"><label class="lbl">Nome *</label><input id="opName" class="in" maxlength="100" value="${ed?esc(ed.name):''}" placeholder="Clube da Ração"></div>
-        <div class="field"><label class="lbl">Loja</label><select id="opStore" class="in"><option value="">Todas</option>${stores}</select></div>
-        <div class="field"><label class="lbl">Periodicidade (dias)</label><input id="opDays" class="in" inputmode="numeric" value="${ed?ed.interval_days:30}"></div>
-        <div class="field"><label class="lbl">Desconto %</label><input id="opDisc" class="in" inputmode="decimal" value="${ed?ed.discount_pct:0}"></div>
-        <div class="field"><label class="lbl">Taxa de entrega</label><input id="opDelivery" class="in" inputmode="decimal" value="${ed?ed.delivery_fee:0}"></div>
+        <div class="field"><label class="lbl" for="opName">Nome *</label><input id="opName" class="in" maxlength="100" value="${ed?esc(ed.name):''}" placeholder="Clube da Ração"></div>
+        <div class="field"><label class="lbl" for="opStore">Loja</label><select id="opStore" class="in"><option value="">Todas</option>${stores}</select></div>
+        <div class="field"><label class="lbl" for="opDays">Periodicidade (dias)</label><input id="opDays" class="in" inputmode="numeric" value="${ed?ed.interval_days:30}"></div>
+        <div class="field"><label class="lbl" for="opDisc">Desconto %</label><input id="opDisc" class="in" inputmode="decimal" value="${ed?ed.discount_pct:0}"></div>
+        <div class="field"><label class="lbl" for="opDelivery">Taxa de entrega</label><input id="opDelivery" class="in" inputmode="decimal" value="${ed?ed.delivery_fee:0}"></div>
       </div>
-      <div class="field"><label class="lbl">Descrição</label><textarea id="opDesc" class="in" rows="2" maxlength="500">${ed?esc(ed.description||''):''}</textarea></div>
+      <div class="field"><label class="lbl" for="opDesc">Descrição</label><textarea id="opDesc" class="in" rows="2" maxlength="500">${ed?esc(ed.description||''):''}</textarea></div>
       <div style="text-align:right"><button class="btn green" data-onclick="opsSavePlan()">${ed?'Salvar alterações':'Criar plano'}</button></div>
     </div></div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Fechar</button></div>`);
@@ -9461,11 +9564,11 @@ function opsQuoteModal(){
   const stores=STORES.map(s=>`<option value="${s.id}" ${s.id===CURRENT_STORE?'selected':''}>${esc(s.nome)}</option>`).join('');
   const due=new Date(Date.now()+7*86400000).toISOString().slice(0,10);
   modal(`<div class="m-head"><h3>Nova cotação</h3><button data-modal-close>×</button></div><div class="m-body">
-    <div class="grid2"><div class="field"><label class="lbl">Loja</label><select id="oqStore" class="in">${stores}</select></div>
-    <div class="field"><label class="lbl">Prazo de resposta</label><input id="oqDue" class="in" type="date" value="${due}"></div>
-    <div class="field"><label class="lbl">Produto</label><select id="oqProduct" class="in">${products}</select></div>
-    <div class="field"><label class="lbl">Quantidade</label><input id="oqQty" class="in" value="1" inputmode="decimal"></div></div>
-    <div class="field"><label class="lbl">Observações</label><textarea id="oqNotes" class="in"></textarea></div></div>
+    <div class="grid2"><div class="field"><label class="lbl" for="oqStore">Loja</label><select id="oqStore" class="in">${stores}</select></div>
+    <div class="field"><label class="lbl" for="oqDue">Prazo de resposta</label><input id="oqDue" class="in" type="date" value="${due}"></div>
+    <div class="field"><label class="lbl" for="oqProduct">Produto</label><select id="oqProduct" class="in">${products}</select></div>
+    <div class="field"><label class="lbl" for="oqQty">Quantidade</label><input id="oqQty" class="in" value="1" inputmode="decimal"></div></div>
+    <div class="field"><label class="lbl" for="oqNotes">Observações</label><textarea id="oqNotes" class="in"></textarea></div></div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn" data-onclick="opsSaveQuote()">Criar cotação</button></div>`);
 }
 async function opsSaveQuote(){
@@ -9477,8 +9580,8 @@ async function opsSaveQuote(){
 function opsInviteModal(){
   const customers=(CUSTOMERS||[]).slice(0,1000).map(c=>`<option value="${c.id}">${esc(c.nome||c.name)} · ${esc(c.email||'sem e-mail')}</option>`).join('');
   modal(`<div class="m-head"><h3>Convidar para o portal</h3><button data-modal-close>×</button></div><div class="m-body">
-    <div class="field"><label class="lbl">Cliente</label><select id="oiCustomer" class="in">${customers}</select></div>
-    <div class="field"><label class="lbl">E-mail de acesso</label><input id="oiEmail" class="in" type="email" autocomplete="off"></div>
+    <div class="field"><label class="lbl" for="oiCustomer">Cliente</label><select id="oiCustomer" class="in">${customers}</select></div>
+    <div class="field"><label class="lbl" for="oiEmail">E-mail de acesso</label><input id="oiEmail" class="in" type="email" autocomplete="off"></div>
     <p class="muted">O cliente receberá um convite seguro e ficará vinculado somente ao próprio cadastro.</p></div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn" data-onclick="opsSendInvite()">Enviar convite</button></div>`);
   $('#oiCustomer').onchange=()=>{const c=(CUSTOMERS||[]).find(x=>x.id===val('oiCustomer'));$('#oiEmail').value=(c&&c.email)||'';};$('#oiCustomer').dispatchEvent(new Event('change'));
@@ -9648,539 +9751,27 @@ const A11Y_OBSERVER=new MutationObserver(records=>records.forEach(record=>record
 applyPaperVar();   // aplica a largura da bobina salva nesta máquina antes de qualquer impressão
 initAuth();
 
-/* ======================================================================
-   ===================== MÓDULO COMPRAS (fusão 247) =====================
-   Mesma lógica do COMPRAS247, porém rodando sobre o backend Supabase do
-   onpdv. O catálogo, as vendas e a curva ABC vêm do onpdv; os fornecedores
-   são os mesmos de Contas a pagar. Fluxo: Lista → Pedido → Aprovação →
-   Recebimento → Concluído/Financeiro, com Cotações, Histórico, Alertas e
-   Auditoria. Requer a migration purchase_workflow_v2 e a
-   purchase_compras_module aplicadas no Supabase.
-   ====================================================================== */
-(() => {
-  const CMP = { sales:null, salesAt:0, order:null, drafts:[], po:[], catList:'geral' };
-  const cmpProd = pid => (PRODUCTS||[]).find(p => String(p.id) === String(pid));
-  const cmpProdCode = p => p ? (p.sku || p.codigo_barras || '—') : '—';
-  const cmpListKey = label => 'onpdv_cmp_list_' + (CURRENT_STORE || 'x') + '_' + label;
-  function cmpListGet(label){ try{ return JSON.parse(localStorage.getItem(cmpListKey(label)) || '{}') || {}; }catch(e){ return {}; } }
-  function cmpListSet(label, map){ try{ localStorage.setItem(cmpListKey(label), JSON.stringify(map)); }catch(e){} }
-  const cmpListLabelName = l => ({geral:'Lista geral', iconha:'Lista Iconha', reta:'Lista Reta'}[l] || 'Lista');
-
-  // ---------- vendas / ABC (reaproveitados do onpdv) ----------
-  async function cmpEnsureSales(force){
-    if(!force && CMP.sales && (Date.now() - CMP.salesAt) < 300000) return CMP.sales;
-    const hoje = new Date();
-    const ini = new Date(hoje.getTime() - 90*86400000).toISOString().slice(0,10);
-    const fim = hoje.toISOString().slice(0,10);
-    let trends = {}, abc = [];
-    try{ const r = await sb.rpc('erp_stock_trends',{ p_store: CURRENT_STORE, p_dias: 14 }); trends = r.data || {}; }catch(e){}
-    try{ const r = await sb.rpc('erp_abc',{ p_ini: ini, p_fim: fim, p_store: CURRENT_STORE }); abc = r.data || []; }catch(e){}
-    const abcMap = {}; abc.forEach(x => { abcMap[String(x.product_id)] = x.classe; });
-    CMP.sales = { trends, abcMap }; CMP.salesAt = Date.now();
-    return CMP.sales;
+/* Módulo Compras (fusão 247): ~540 linhas que saíram deste arquivo para
+   assets/js/onpdv-compras.js e só são baixadas quando uma aba de Compras abre —
+   mesmo padrão do Raio-X Financeiro. O caixa, que nunca abre Compras, deixa de
+   carregar esse peso no login. */
+let COMPRAS_LOADING=null;
+function openCompras(pg){
+  const abrir=()=>{ if(window.CMP_PAGES && window.CMP_PAGES[pg]) window.CMP_PAGES[pg](); };
+  if(window.CMP_PAGES){ abrir(); return; }
+  const host=$('#page-'+pg);
+  if(host && !host.innerHTML) host.innerHTML='<div class="card pad">Carregando o módulo de Compras…</div>';
+  if(!COMPRAS_LOADING){
+    COMPRAS_LOADING=new Promise((resolve,reject)=>{
+      const s=document.createElement('script');
+      s.src='assets/js/onpdv-compras.js';
+      s.addEventListener('load',resolve,{once:true});
+      s.addEventListener('error',()=>reject(new Error('Falha ao carregar o módulo de Compras.')),{once:true});
+      document.body.appendChild(s);
+    }).catch(err=>{ COMPRAS_LOADING=null; throw err; });
   }
-  const cmpDaily = (trends, pid) => { const t = trends[String(pid)]; return t ? (Number(t.recent)||0)/14 : 0; };
-  const cmpAbcChip = cls => cls ? `<span class="chip ${cls==='A'?'ok':cls==='B'?'amber':'warn'}">ABC ${esc(cls)}</span>` : '<span class="muted">—</span>';
-
-  const cmpFillSuppliers = sel => { if(sel) sel.innerHTML = '<option value="">Selecione</option>' + (SUPPLIERS||[]).map(s=>`<option value="${s.id}">${esc(s.nome)}</option>`).join(''); };
-  const cmpFillStores = (sel, all) => { if(sel) sel.innerHTML = (all?'<option value="">Todas as lojas</option>':'') + (STORES||[]).map(s=>`<option value="${s.id}" ${!all&&s.id===CURRENT_STORE?'selected':''}>${esc(s.nome)}${s.is_matriz?' ★':''}</option>`).join(''); };
-  const cmpSupplierName = id => { const s=(SUPPLIERS||[]).find(x=>String(x.id)===String(id)); return s?(s.nome||'—'):(id||'—'); };
-
-  // =================== LISTA (geral / iconha / reta) ===================
-  async function cmpRenderLista(label){
-    const host = $('#page-cmp' + (label==='geral'?'Lista':label==='iconha'?'ListaIconha':'ListaReta') + ' > div');
-    if(!host) return;
-    host.innerHTML = '<div class="card pad"><p class="muted">Carregando catálogo e vendas…</p></div>';
-    const { trends, abcMap } = await cmpEnsureSales();
-    const map = cmpListGet(label);
-    const ids = Object.keys(map);
-    // Iconha e Reta são filiais: os itens viram uma transferência (Modelo → filial),
-    // não uma compra de fornecedor. A montagem final acontece na aba Transferências.
-    const isTransfer = (label === 'iconha' || label === 'reta');
-    const primaryBtn = isTransfer
-      ? `<button class="btn" data-onclick="cmpListToTransfer('${label}')">🔄 Montar transferência</button>`
-      : `<button class="btn" data-onclick="cmpListToOrder('${label}')">Montar pedido</button>`;
-    const listRows = ids.map(pid => {
-      const p = cmpProd(pid); if(!p) return '';
-      const dia = cmpDaily(trends, pid);
-      return `<tr>
-        <td>${esc(cmpProdCode(p))}</td>
-        <td><b>${esc(p.nome)}</b></td>
-        <td class="r"><input class="in" style="width:80px;text-align:right;padding:5px 7px" inputmode="decimal" value="${num(map[pid])||0}" data-oninput="cmpListQty('${label}','${pid}', this.value)"></td>
-        <td class="c">${p.track_stock?trendBadge(trends[String(pid)]):'—'}</td>
-        <td class="r">${fmtNum(dia)}<span class="muted" style="font-size:11px">/dia</span></td>
-        <td>${cmpAbcChip(abcMap[String(pid)])}</td>
-        <td class="r"><button class="btn ghost sm red" data-onclick="cmpListRemove('${label}','${pid}')">Remover</button></td>
-      </tr>`;
-    }).join('');
-    host.innerHTML = `
-      <div class="stats">
-        <div class="stat"><div class="k">Itens na lista</div><div class="v" id="cmpListCount_${label}">${ids.length}</div></div>
-        <div class="stat"><div class="k">Sugestão total (30 dias)</div><div class="v">${ids.reduce((a,pid)=>a+Math.max(1,Math.round(cmpDaily(trends,pid)*30)),0).toLocaleString('pt-BR')}</div></div>
-      </div>
-      <div class="card pad">
-        <div class="head"><h2>📝 ${esc(cmpListLabelName(label))}</h2><span class="grow"></span>
-          <button class="btn ghost" data-onclick="cmpGoCatalogo('${label}')">📦 Catálogo</button>
-          ${primaryBtn}</div>
-        <div class="tbl-wrap"><table>
-          <thead><tr><th>Código</th><th>Produto</th><th class="r">Quantidade</th><th class="c">Tendência</th><th class="r">Média móvel</th><th>ABC</th><th></th></tr></thead>
-          <tbody>${listRows || '<tr><td colspan="7" class="muted" style="text-align:center;padding:18px">Nenhum produto na lista. Adicione itens pelo Catálogo.</td></tr>'}</tbody>
-        </table></div>
-      </div>`;
-  }
-
-  // =================== CATÁLOGO (separado da Lista) ===================
-  async function cmpRenderCatalogo(){
-    const host = $('#cmpCatalogoHost');
-    if(!host) return;
-    host.innerHTML = '<div class="card pad"><p class="muted">Carregando catálogo e vendas…</p></div>';
-    const { trends } = await cmpEnsureSales();
-    const label = CMP.catList || 'geral';
-    const map = cmpListGet(label);
-    const catRows = (PRODUCTS||[]).slice(0, 400).map(p => {
-      const dia = cmpDaily(trends, p.id);
-      const sug = Math.max(1, Math.round(dia*30));
-      return `<tr data-cmpname="${esc(normTxt(p.nome+' '+(p.sku||'')))}">
-        <td><b>${esc(p.nome)}</b> <span class="muted" style="font-size:11px">${esc(cmpProdCode(p))}</span></td>
-        <td class="r">${p.track_stock?(Number(p.estoque)||0).toLocaleString('pt-BR'):'—'}</td>
-        <td class="r muted">${BRL(p.custo)}</td>
-        <td class="r">${fmtNum(dia)}<span class="muted" style="font-size:11px">/dia</span></td>
-        <td class="r"><button class="btn ghost sm" data-onclick="cmpCatAdd('${p.id}', ${sug})">${map[p.id]!=null?'✓ na lista':'+ adicionar'}</button></td>
-      </tr>`;
-    }).join('');
-    const listOpts = ['geral','iconha','reta'].map(v =>
-      `<option value="${v}" ${v===label?'selected':''}>${esc(cmpListLabelName(v))}</option>`).join('');
-    host.innerHTML = `
-      <div class="card pad">
-        <div class="head"><h2>📦 Catálogo do onpdv</h2><span class="grow"></span>
-          <label class="lbl" style="margin:0 8px 0 0;align-self:center">Adicionar em</label>
-          <select class="in" style="max-width:180px" data-onchange="cmpCatListChange(this.value)">${listOpts}</select>
-          <input class="in" style="max-width:260px" placeholder="Buscar produto…" data-oninput="cmpCatFilter('cat', this.value)"></div>
-        <div class="tbl-wrap"><table>
-          <thead><tr><th>Produto</th><th class="r">Estoque</th><th class="r">Custo</th><th class="r">Média móvel</th><th></th></tr></thead>
-          <tbody id="cmpCatBody_cat">${catRows}</tbody>
-        </table></div>
-        <p class="muted" style="font-size:12px;padding:10px 4px 0">Mostrando os primeiros produtos do catálogo. Use a busca para encontrar itens específicos. Os itens são adicionados na lista selecionada acima. Média móvel e tendência vêm das vendas do onpdv.</p>
-      </div>`;
-  }
-  window.cmpGoCatalogo = label => { CMP.catList = label || 'geral'; openBoPage('cmpCatalogo'); };
-  window.cmpCatListChange = v => { CMP.catList = v || 'geral'; cmpRenderCatalogo(); };
-  window.cmpCatAdd = (pid, sug) => { const label = CMP.catList || 'geral'; const m = cmpListGet(label); m[pid] = num(m[pid]) || sug || 1; cmpListSet(label, m); cmpRenderCatalogo(); };
-  window.cmpCatFilter = (label, q) => {
-    const nq = normTxt(q||''); const body = $('#cmpCatBody_' + label); if(!body) return;
-    body.querySelectorAll('tr').forEach(tr => { tr.style.display = (!nq || (tr.dataset.cmpname||'').includes(nq)) ? '' : 'none'; });
-  };
-  window.cmpListAdd = (label, pid, sug) => { const m = cmpListGet(label); m[pid] = num(m[pid]) || sug || 1; cmpListSet(label, m); cmpRenderLista(label); };
-  window.cmpListRemove = (label, pid) => { const m = cmpListGet(label); delete m[pid]; cmpListSet(label, m); cmpRenderLista(label); };
-  window.cmpListQty = (label, pid, val) => { const m = cmpListGet(label); const q = num(val); if(q>0) m[pid] = q; else delete m[pid]; cmpListSet(label, m); const c = $('#cmpListCount_'+label); if(c) c.textContent = Object.keys(m).length; };
-  window.cmpListToOrder = label => { const sel = $('#cmpPoList'); if(sel) sel.value = label; openBoPage('cmpPedido'); };
-
-  // Iconha/Reta → aba Transferências: carrega os itens da lista no carrinho de
-  // transferência (Modelo → filial) e usa a mesma lógica já existente para montar/gerar.
-  window.cmpListToTransfer = label => {
-    const map = cmpListGet(label);
-    const items = Object.keys(map).map(pid => {
-      const p = cmpProd(pid); if(!p) return null;
-      return { product_id:String(pid), nome:p.nome||String(pid), qtd:Math.max(1, num(map[pid])||1), custo:Number(p.custo)||0 };
-    }).filter(Boolean);
-    if(!items.length){ toast('A lista está vazia — adicione itens pelo Catálogo.', true); return; }
-    // mescla no carrinho: soma a quantidade de itens já presentes, acrescenta os novos
-    items.forEach(it => { const ex = TR_CART.find(x => String(x.product_id) === it.product_id); if(ex) ex.qtd += it.qtd; else TR_CART.push(it); });
-    if(!TR_SOURCE_LISTS.includes(label)) TR_SOURCE_LISTS.push(label);   // origem p/ esvaziar ao gerar
-    openBoPage('transfer');                            // dispara loadTransfers()/renderTrCart()
-    const store = (STORES||[]).find(s => !s.is_matriz && normTxt(s.nome||'').includes(label));
-    const dest = $('#trDest'); if(dest && store) dest.value = store.id;   // pré-seleciona a filial pelo nome
-    toast('Itens da ' + cmpListLabelName(label) + ' adicionados à transferência');
-  };
-  // permite ao fluxo de transferências (código global) esvaziar uma lista de Compras
-  window.cmpClearList = label => { cmpListSet(label, {}); if(typeof currentPage === 'string' && currentPage.startsWith('cmpLista')) cmpRenderLista(label); };
-
-  // =================== MONTAR PEDIDO ===================
-  function cmpRenderPedido(){
-    cmpFillSuppliers($('#cmpPoSup'));
-    cmpFillStores($('#cmpPoStore'), false);
-    const buyer = $('#cmpPoBuyer'); if(buyer && !buyer.value) buyer.value = (ME && (ME.nome || ME.name)) || 'Compras';
-    if(PURCHASE_FLOW && PURCHASE_FLOW.config){ const pr=$('#cmpPoPriority'); if(pr) pr.value = PURCHASE_FLOW.config.default_priority || 'normal'; }
-    else { try{ loadPurchaseWorkflowConfig(); }catch(e){} }
-    cmpBuildOrderFromList();
-  }
-  function cmpBuildOrderFromList(){
-    const label = ($('#cmpPoList')||{}).value || 'geral';
-    const map = cmpListGet(label);
-    CMP.order = {};
-    Object.keys(map).forEach(pid => { const p = cmpProd(pid); if(!p) return; CMP.order[pid] = { qty: num(map[pid])||0, custo: Number(p.custo)||0, sel: true }; });
-    cmpRenderOrderSelection();
-  }
-  window.cmpPoSourceChange = cmpBuildOrderFromList;
-  function cmpRenderOrderSelection(){
-    const box = $('#cmpPoSelection'), empty = $('#cmpPoEmpty');
-    const ids = Object.keys(CMP.order||{});
-    if(!ids.length){ if(box) box.innerHTML=''; if(empty) empty.style.display='block'; cmpUpdateOrderTotals(); return; }
-    if(empty) empty.style.display='none';
-    box.innerHTML = ids.map(pid => {
-      const p = cmpProd(pid), it = CMP.order[pid];
-      return `<tr>
-        <td class="c"><input type="checkbox" ${it.sel?'checked':''} data-onchange="cmpOrderSel('${pid}', this.checked)"></td>
-        <td><b>${esc(p?p.nome:pid)}</b> <span class="muted" style="font-size:11px">${esc(cmpProdCode(p))}</span></td>
-        <td class="r"><input class="in" style="width:72px;text-align:right;padding:5px 7px" inputmode="decimal" value="${it.qty}" data-oninput="cmpOrderQty('${pid}', this.value)"></td>
-        <td class="r"><input class="in" style="width:92px;text-align:right;padding:5px 7px" inputmode="decimal" value="${(Number(it.custo)||0).toFixed(2).replace('.',',')}" data-oninput="cmpOrderCost('${pid}', this.value)"></td>
-        <td class="r"><b id="cmpOrderSub_${pid}">${BRL(it.qty*it.custo)}</b></td>
-      </tr>`;
-    }).join('');
-    cmpUpdateOrderTotals();
-  }
-  window.cmpOrderSel = (pid, v) => { if(CMP.order[pid]){ CMP.order[pid].sel = !!v; cmpUpdateOrderTotals(); } };
-  window.cmpOrderQty = (pid, val) => { if(CMP.order[pid]){ CMP.order[pid].qty = num(val); const s=$('#cmpOrderSub_'+pid); if(s) s.textContent=BRL(CMP.order[pid].qty*CMP.order[pid].custo); cmpUpdateOrderTotals(); } };
-  window.cmpOrderCost = (pid, val) => { if(CMP.order[pid]){ CMP.order[pid].custo = num(val); const s=$('#cmpOrderSub_'+pid); if(s) s.textContent=BRL(CMP.order[pid].qty*CMP.order[pid].custo); cmpUpdateOrderTotals(); } };
-  window.cmpPedidoSelectAll = () => { Object.keys(CMP.order||{}).forEach(pid => CMP.order[pid].sel = true); cmpRenderOrderSelection(); };
-  function cmpSelectedItems(){ return Object.keys(CMP.order||{}).filter(pid => CMP.order[pid].sel && CMP.order[pid].qty>0).map(pid => ({ product_id:String(pid), descricao:(cmpProd(pid)||{}).nome||'', qtd:CMP.order[pid].qty, custo:CMP.order[pid].custo })); }
-  function cmpUpdateOrderTotals(){
-    const items = cmpSelectedItems();
-    const total = items.reduce((a,i)=>a+i.qtd*i.custo,0);
-    const n = Math.max(1, parseInt(($('#cmpPoInstallments')||{}).value)||1);
-    const s1=$('#cmpPoItemsStat'); if(s1) s1.textContent = items.length;
-    const s2=$('#cmpPoTotalStat'); if(s2) s2.textContent = BRL(total);
-    const s3=$('#cmpPoInstStat'); if(s3) s3.textContent = BRL(total/n);
-    cmpRenderSchedule(total, n);
-  }
-  function cmpRenderSchedule(total, n){
-    const box = $('#cmpPoSchedule'); if(!box) return;
-    if(!(total>0)){ box.innerHTML=''; return; }
-    const interval = Math.max(1, parseInt(($('#cmpPoInterval')||{}).value)||30);
-    const base = ($('#cmpPoDelivery')||{}).value ? new Date(($('#cmpPoDelivery').value)+'T00:00:00') : new Date();
-    const val = total/n; let html = '<div class="sum" style="margin-top:14px"><div class="l"><span>Boletos</span><b>'+n+'× de '+BRL(val)+'</b></div>';
-    for(let k=0;k<n;k++){ const d=new Date(base.getTime()); d.setDate(d.getDate()+interval*k); html += '<div class="l"><span>Boleto '+(k+1)+' · '+d.toLocaleDateString('pt-BR')+'</span><b>'+BRL(val)+'</b></div>'; }
-    box.innerHTML = html + '</div>';
-  }
-  ['cmpPoInstallments','cmpPoInterval','cmpPoDelivery'].forEach(id => { document.addEventListener('input', e => { if(e.target && e.target.id===id) cmpUpdateOrderTotals(); }); });
-  document.addEventListener('change', e => { if(e.target && e.target.id==='cmpPoList') cmpBuildOrderFromList(); });
-
-  window.cmpPedidoCancel = async () => {
-    const has = Object.keys(CMP.order||{}).length;
-    if(has && !await uiConfirm('Cancelar o pedido em montagem? Os itens selecionados serão descartados (a lista de origem não é alterada).', { danger:true, okText:'Cancelar pedido', cancelText:'Voltar' })) return;
-    CMP.order = {};
-    ['cmpPoSup','cmpPoNotes','cmpPoDelivery'].forEach(id => { const el=$('#'+id); if(el) el.value=''; });
-    const inst=$('#cmpPoInstallments'); if(inst) inst.value='1';
-    const intv=$('#cmpPoInterval'); if(intv) intv.value='30';
-    const pr=$('#cmpPoPriority'); if(pr) pr.value = (PURCHASE_FLOW && PURCHASE_FLOW.config && PURCHASE_FLOW.config.default_priority) || 'normal';
-    cmpRenderOrderSelection();
-    toast('Pedido cancelado');
-  };
-  window.cmpPedidoSend = async () => {
-    const items = cmpSelectedItems();
-    if(!items.length){ toast('Selecione ao menos um item com quantidade.', true); return; }
-    const supplier = ($('#cmpPoSup')||{}).value;
-    if(!supplier){ toast('Escolha o fornecedor.', true); return; }
-    const store = ($('#cmpPoStore')||{}).value || CURRENT_STORE;
-    const total = items.reduce((a,i)=>a+i.qtd*i.custo,0);
-    const meta = {
-      store_id: String(store||''), supplier_id: String(supplier), buyer_name: ($('#cmpPoBuyer')||{}).value || null,
-      priority: ($('#cmpPoPriority')||{}).value || 'normal', delivery_on: ($('#cmpPoDelivery')||{}).value || null,
-      installments: Math.max(1, parseInt(($('#cmpPoInstallments')||{}).value)||1), interval_days: Math.max(1, parseInt(($('#cmpPoInterval')||{}).value)||30),
-      notes: ($('#cmpPoNotes')||{}).value || null
-    };
-    await loadPurchaseWorkflowConfig().catch(()=>{});
-    const auto = PURCHASE_FLOW.enabled && Number(PURCHASE_FLOW.config.auto_approval_limit)>0 && total <= Number(PURCHASE_FLOW.config.auto_approval_limit);
-    if(auto){
-      const { data, error } = await sb.rpc('erp_po_create',{ p_supplier:supplier, p_store:store, p_items:items, p_venc:meta.delivery_on, p_obs:meta.notes });
-      if(error){ toast('Erro: '+error.message, true); return; }
-      const orderId = purchaseOrderId(data);
-      if(orderId){ await purchaseWorkflowSaveMeta(orderId, { ...meta, approval_type:'automatic', approved_at:new Date().toISOString() }); await purchaseWorkflowRecordApproval(orderId,'automatic'); if(meta.installments>1){ await sb.rpc('erp_purchase_split_payable',{ p_po:orderId, p_installments:meta.installments, p_interval_days:meta.interval_days, p_first_due:meta.delivery_on||null }); } }
-      toast('Pedido aprovado automaticamente (dentro do limite) ✅'+(meta.installments>1?' · '+meta.installments+' boletos gravados':' · '+BRL(total)));
-    } else {
-      const r = await purchaseFlowRpc('erp_purchase_draft_save',{ p_draft: { ...meta, items } });
-      if(r.error){ if(r.missing) toast('Aplique a migration purchase_compras_module no Supabase.', true); return; }
-      toast('Pedido enviado para aprovação ✅');
-    }
-    // limpa da lista os itens efetivamente enviados
-    const label = ($('#cmpPoList')||{}).value || 'geral';
-    const m = cmpListGet(label); items.forEach(i => delete m[i.product_id]); cmpListSet(label, m);
-    CMP.order = {}; cmpRenderOrderSelection();
-    openBoPage('cmpAprovacao');
-  };
-
-  // =================== APROVAÇÃO ===================
-  async function cmpRenderAprovacao(){
-    const body = $('#cmpAprovacaoBody'), empty = $('#cmpAprovacaoEmpty');
-    body.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:14px">Carregando…</td></tr>'; if(empty) empty.style.display='none';
-    await loadPurchaseWorkflowConfig().catch(()=>{});
-    const dr = await purchaseFlowRpc('erp_purchase_draft_list',{ p_status:'pending' }, { silent:true });
-    CMP.drafts = (dr && dr.data) || [];
-    let rascunhos = [];
-    try{ const r = await sb.rpc('erp_po_list',{ p_status:'rascunho' }); rascunhos = r.data || []; }catch(e){}
-    const prio = p => ({baixa:'<span class="chip">baixa</span>', normal:'<span class="chip">normal</span>', alta:'<span class="chip amber">alta</span>', urgente:'<span class="chip warn">urgente</span>'}[p] || `<span class="chip">${esc(p||'normal')}</span>`);
-    const draftRows = CMP.drafts.map(d => `<tr class="clickrow" data-onclick="cmpDraftDetail(${d.id})">
-      <td><span class="chip">manual</span></td><td>${esc(cmpSupplierName(d.supplier_id))}</td><td>${esc(d.buyer_name||'—')}</td>
-      <td class="r"><b>${BRL(d.total)}</b></td><td>${prio(d.priority)}</td>
-      <td class="r" style="white-space:nowrap" data-onclick="event.stopPropagation()">
-        <button class="btn green sm" data-onclick="cmpApproveDraft(${d.id})">Aprovar</button>
-        <button class="btn ghost sm red" data-onclick="cmpRejectDraft(${d.id})">Rejeitar</button></td></tr>`).join('');
-    const poRows = rascunhos.map(r => `<tr class="clickrow" data-onclick="poDetail('${r.id}')">
-      <td><span class="chip amber">inteligente</span></td><td>${esc(r.fornecedor||'—')}</td><td><span class="muted">${esc(r.loja||'—')}</span></td>
-      <td class="r"><b>${BRL(r.total_previsto)}</b></td><td><span class="muted">—</span></td>
-      <td class="r" style="white-space:nowrap" data-onclick="event.stopPropagation()">
-        <button class="btn green sm" data-onclick="cmpApprovePo('${r.id}')">Aprovar</button>
-        <button class="btn ghost sm red" data-onclick="poCancel('${r.id}')">Cancelar</button></td></tr>`).join('');
-    body.innerHTML = draftRows + poRows;
-    if(empty) empty.style.display = (CMP.drafts.length || rascunhos.length) ? 'none' : 'block';
-  }
-  window.cmpDraftDetail = id => {
-    const d = (CMP.drafts||[]).find(x => Number(x.id) === Number(id)); if(!d) return;
-    const items = Array.isArray(d.items)?d.items:[];
-    const rows = items.map(i => `<tr><td>${esc(i.descricao||i.product_id)}</td><td class="r">${num(i.qtd)}</td><td class="r">${BRL(num(i.custo))}</td><td class="r"><b>${BRL(num(i.qtd)*num(i.custo))}</b></td></tr>`).join('');
-    modal(`<div class="m-head"><h3>Pedido · ${esc(cmpSupplierName(d.supplier_id))}</h3><button data-modal-close>✕</button></div>
-      <div class="m-body">
-        <p class="muted">Solicitante <b>${esc(d.buyer_name||'—')}</b> · prioridade <b>${esc(d.priority||'normal')}</b> · ${d.installments||1} boleto(s)${d.delivery_on?' · entrega '+fmtDate(d.delivery_on):''}</p>
-        ${d.notes?`<p class="muted">Obs: ${esc(d.notes)}</p>`:''}
-        <div class="tbl-wrap"><table><thead><tr><th>Produto</th><th class="r">Qtd</th><th class="r">Custo</th><th class="r">Subtotal</th></tr></thead><tbody>${rows||'<tr><td colspan="4" class="muted">Sem itens.</td></tr>'}</tbody></table></div>
-        <div class="sum" style="margin-top:8px"><div class="l big"><span>Total</span><b>${BRL(d.total)}</b></div></div>
-      </div>
-      <div class="m-foot"><button class="btn ghost red" data-onclick="closeModal();cmpRejectDraft(${d.id})">Rejeitar</button><button class="btn green" data-onclick="closeModal();cmpApproveDraft(${d.id})">Aprovar</button></div>`);
-  };
-  window.cmpApproveDraft = async id => {
-    const d = (CMP.drafts||[]).find(x => Number(x.id) === Number(id)); if(!d){ cmpRenderAprovacao(); return; }
-    if(!d.supplier_id){ toast('Este pedido não tem fornecedor.', true); return; }
-    if(!await uiConfirm('Aprovar este pedido? A conta a pagar prevista será criada agora.',{okText:'Aprovar',cancelText:'Voltar'})) return;
-    const items = (Array.isArray(d.items)?d.items:[]).map(i => ({ product_id:String(i.product_id), descricao:i.descricao||'', qtd:num(i.qtd), custo:num(i.custo) }));
-    const { data, error } = await sb.rpc('erp_po_create',{ p_supplier:d.supplier_id, p_store:d.store_id||CURRENT_STORE, p_items:items, p_venc:d.delivery_on||null, p_obs:d.notes||null });
-    if(error){ toast('Erro: '+error.message, true); return; }
-    const orderId = purchaseOrderId(data);
-    if(orderId){
-      await purchaseWorkflowSaveMeta(orderId, { store_id:d.store_id?String(d.store_id):null, supplier_id:String(d.supplier_id), buyer_name:d.buyer_name||null, priority:d.priority||'normal', delivery_on:d.delivery_on||null, installments:d.installments||1, approval_type:'manual', approved_at:new Date().toISOString() });
-      await purchaseWorkflowRecordApproval(orderId,'manual');
-      if((d.installments||1) > 1){ await sb.rpc('erp_purchase_split_payable',{ p_po:orderId, p_installments:d.installments, p_interval_days:d.interval_days||30, p_first_due:d.delivery_on||null }); }
-    }
-    await purchaseFlowRpc('erp_purchase_draft_set_status',{ p_id:Number(id), p_status:'approved', p_reason:null, p_order_id:orderId?String(orderId):null }, { silent:true });
-    const nb = d.installments||1;
-    toast('Pedido aprovado · '+(nb>1?nb+' boleto(s) de compra gravado(s) ✅':'conta a pagar de '+BRL(data && data.total)+' criada ✅'));
-    cmpRenderAprovacao();
-  };
-  window.cmpRejectDraft = async id => {
-    const reason = await uiPrompt('Justificativa para rejeitar o pedido:', '', { title:'Rejeitar pedido', okText:'Rejeitar' });
-    if(reason===null) return; if(!reason.trim()){ toast('A justificativa é obrigatória.', true); return; }
-    const r = await purchaseFlowRpc('erp_purchase_draft_set_status',{ p_id:Number(id), p_status:'rejected', p_reason:reason.trim() }, { silent:true });
-    if(r.error) return; toast('Pedido rejeitado.'); cmpRenderAprovacao();
-  };
-  window.cmpApprovePo = async id => {
-    if(!await uiConfirm('Aprovar este rascunho? A conta a pagar será criada agora.',{okText:'Aprovar',cancelText:'Voltar'})) return;
-    const { data, error } = await sb.rpc('erp_po_approve',{ p_po:id });
-    if(error){ toast('Erro: '+error.message, true); return; }
-    await purchaseWorkflowSaveMeta(id, { approval_type:'manual', approved_at:new Date().toISOString(), buyer_name:(ME&&(ME.nome||ME.name))||null });
-    await purchaseWorkflowRecordApproval(id,'manual');
-    toast('Compra aprovada · conta a pagar de '+BRL(data && data.total)+' criada ✅'); cmpRenderAprovacao();
-  };
-
-  // =================== RECEBIMENTO ===================
-  async function cmpRenderRecebimento(){
-    const body = $('#cmpRecebimentoBody'), empty = $('#cmpRecebimentoEmpty');
-    body.innerHTML='';
-    let rows=[];
-    try{
-      const [a,b] = await Promise.all([ sb.rpc('erp_po_list',{p_status:'pendente'}), sb.rpc('erp_po_list',{p_status:'parcial'}) ]);
-      rows = [...(a.data||[]), ...(b.data||[])];
-    }catch(e){}
-    const chip = s => ({pendente:'<span class="chip amber">pendente</span>', parcial:'<span class="chip">parcial</span>'}[s]||esc(s));
-    body.innerHTML = rows.map(r => `<tr class="clickrow" data-onclick="poDetail('${r.id}')">
-      <td>${new Date(r.created_at).toLocaleDateString('pt-BR')}</td><td>${esc(r.fornecedor||'—')}</td><td>${esc(r.loja||'—')}</td>
-      <td class="r">${BRL(r.total_previsto)}</td><td class="r">${BRL(r.total_recebido)}</td><td>${chip(r.status)}</td>
-      <td class="r" data-onclick="event.stopPropagation()"><button class="btn green sm" data-onclick="poReceive('${r.id}')">Receber</button></td></tr>`).join('');
-    if(empty) empty.style.display = rows.length ? 'none' : 'block';
-  }
-
-  // =================== PEDIDOS CONCLUÍDOS ===================
-  async function cmpRenderConcluido(){
-    const body = $('#cmpConcluidoBody'), empty = $('#cmpConcluidoEmpty'); body.innerHTML='';
-    let rows=[]; try{ const r = await sb.rpc('erp_po_list',{p_status:'recebido'}); rows = r.data||[]; }catch(e){}
-    body.innerHTML = rows.map(r => `<tr class="clickrow" data-onclick="poDetail('${r.id}')">
-      <td>${new Date(r.created_at).toLocaleDateString('pt-BR')}</td><td>${esc(r.fornecedor||'—')}</td><td>${esc(r.loja||'—')}</td>
-      <td class="r"><b>${BRL(r.total_recebido)}</b></td><td>${r.received_at?fmtDT(r.received_at):'—'}</td>
-      <td class="r" data-onclick="event.stopPropagation()"><button class="btn ghost sm" data-onclick="poDetail('${r.id}')">Detalhes</button></td></tr>`).join('');
-    if(empty) empty.style.display = rows.length ? 'none' : 'block';
-  }
-
-  // =================== FINANCEIRO (boletos / contas a pagar) ===================
-  async function cmpRenderFinanceiro(){
-    cmpFillStores($('#cmpFinStore'), true);
-    const loja = ($('#cmpFinStore')||{}).value || null;
-    const body = $('#cmpFinBody'), empty = $('#cmpFinEmpty'); body.innerHTML='';
-    let rows=[]; try{ const r = await sb.rpc('erp_payables_list',{ p_ini:null, p_fim:null, p_status:'abertas', p_store:loja }); rows = (r.data||[]).filter(x => x.fornecedor); }catch(e){}
-    const tot = rows.reduce((a,r)=>a+ +r.valor,0), venc = rows.filter(r=>r.atrasada), totV = venc.reduce((a,r)=>a+ +r.valor,0);
-    const prox = rows.filter(r=>!r.atrasada).sort((a,b)=> new Date(a.vencimento)-new Date(b.vencimento))[0];
-    $('#cmpFinTotal').textContent = BRL(tot); $('#cmpFinCount').textContent = rows.length;
-    $('#cmpFinVenc').textContent = BRL(totV); $('#cmpFinNext').textContent = prox?fmtDate(prox.vencimento):'—';
-    body.innerHTML = rows.map(r => `<tr class="clickrow ${r.atrasada?'low':''}" data-onclick="payableDetail('${r.id}')">
-      <td>${fmtDate(r.vencimento)}</td><td><b>${esc(r.fornecedor||'—')}</b></td><td>${esc(r.loja_nome||'—')}</td>
-      <td>${r.categoria?`<span class="chip">${esc(r.categoria)}</span>`:'<span class="muted">—</span>'}</td>
-      <td class="r"><b>${BRL(r.valor)}</b></td><td>${r.atrasada?'<span class="chip warn">vencida</span>':'<span class="chip amber">aberta</span>'}</td></tr>`).join('');
-    if(empty) empty.style.display = rows.length ? 'none' : 'block';
-  }
-
-  // =================== FORNECEDORES (mesmos do onpdv) ===================
-  async function cmpRenderFornecedores(){
-    const body = $('#cmpFornecBody'), empty = $('#cmpFornecEmpty'); body.innerHTML='';
-    let rows=[]; try{ const r = await sb.from('suppliers').select('*').eq('ativo',true).order('nome'); rows = r.data||[]; }catch(e){}
-    body.innerHTML = rows.map(s => `<tr>
-      <td><b>${esc(s.nome)}</b></td><td>${esc(s.cnpj||'—')}</td><td>${esc(s.telefone||'—')}</td><td>${esc(s.email||'—')}</td>
-      <td class="r">${s.lead_time_days||7}</td>
-      <td class="r"><button class="btn ghost sm" data-onclick='cmpSupplierForm(${JSON.stringify(s).replace(/'/g,"&#39;")})'>Editar</button></td></tr>`).join('');
-    if(empty) empty.style.display = rows.length ? 'none' : 'block';
-  }
-  window.cmpSupplierForm = (s) => {
-    s = s || {};
-    modal(`<div class="m-head"><h3>${s.id?'Editar':'Novo'} fornecedor</h3><button data-modal-close>✕</button></div>
-      <div class="m-body"><div class="grid2">
-        <div class="field"><label class="lbl">Nome</label><input id="cmpSuNome" class="in" value="${esc(s.nome||'')}"></div>
-        <div class="field"><label class="lbl">CNPJ</label><input id="cmpSuCnpj" class="in" value="${esc(s.cnpj||'')}"></div>
-        <div class="field"><label class="lbl">Telefone</label><input id="cmpSuFone" class="in" value="${esc(s.telefone||'')}"></div>
-        <div class="field"><label class="lbl">E-mail</label><input id="cmpSuEmail" class="in" value="${esc(s.email||'')}"></div>
-        <div class="field"><label class="lbl">Prazo de entrega (dias)</label><input id="cmpSuLead" class="in" inputmode="numeric" value="${s.lead_time_days||7}"></div>
-      </div></div>
-      <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button><button class="btn green" data-onclick="cmpSupplierSave('${s.id||''}')">Salvar</button></div>`,'wide');
-  };
-  window.cmpSupplierSave = async id => {
-    const nome = ($('#cmpSuNome')||{}).value.trim(); if(!nome){ toast('Informe o nome.', true); return; }
-    const { error } = await sb.rpc('erp_supplier_upsert',{ p:{ id:id||null, nome, cnpj:($('#cmpSuCnpj')||{}).value, telefone:($('#cmpSuFone')||{}).value, email:($('#cmpSuEmail')||{}).value, lead_time_days:parseInt(($('#cmpSuLead')||{}).value)||7 } });
-    if(error){ toast('Erro: '+error.message, true); return; }
-    await loadSuppliers(); closeModal(); toast('Fornecedor salvo ✅'); cmpRenderFornecedores();
-  };
-
-  // =================== COTAÇÕES ===================
-  function cmpRenderCotacoesForm(){
-    const ps = $('#cmpQuoteProduct'); if(ps) ps.innerHTML = '<option value="">Selecione</option>' + (PRODUCTS||[]).map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join('');
-    cmpFillSuppliers($('#cmpQuoteSupplier'));
-    cmpRenderCotacoes();
-  }
-  window.cmpQuoteSave = async () => {
-    const pid = ($('#cmpQuoteProduct')||{}).value, sid = ($('#cmpQuoteSupplier')||{}).value, price = num(($('#cmpQuotePrice')||{}).value);
-    if(!pid || !sid || !(price>0)){ toast('Produto, fornecedor e preço são obrigatórios.', true); return; }
-    const item = { quote_ref:'catalog', product_id:String(pid), supplier_id:String(sid), unit_price:price, delivery_days:Math.max(0,parseInt(($('#cmpQuoteDays')||{}).value)||0), notes:($('#cmpQuoteNotes')||{}).value||null };
-    const r = await purchaseFlowRpc('erp_purchase_quote_responses_save',{ p_items:[item] });
-    if(r.error) return; toast('Cotação salva ✅'); const pv=$('#cmpQuotePrice'); if(pv) pv.value=''; const nv=$('#cmpQuoteNotes'); if(nv) nv.value=''; cmpRenderCotacoes();
-  };
-  async function cmpRenderCotacoes(){
-    const body = $('#cmpCotacoesBody'), empty = $('#cmpCotacoesEmpty'); if(!body) return; body.innerHTML='';
-    const r = await purchaseFlowRpc('erp_purchase_quote_responses_list',{ p_products:null, p_quote_ref:'catalog' }, { silent:true });
-    const rows = (r && r.data) || [];
-    body.innerHTML = rows.map(q => { const p = cmpProd(q.product_id);
-      return `<tr><td>${esc(p?p.nome:q.product_id)}</td><td>${esc(cmpSupplierName(q.supplier_id))}</td>
-        <td class="r"><b>${BRL(q.unit_price)}</b></td><td class="r">${q.delivery_days||0} d</td>
-        <td>${q.is_best?'<span class="chip ok">melhor preço</span>':'<span class="muted">—</span>'}</td></tr>`; }).join('');
-    if(empty) empty.style.display = rows.length ? 'none' : 'block';
-  }
-
-  // =================== HISTÓRICO DE PREÇO ===================
-  function cmpRenderHistoricoInit(){
-    const sel = $('#cmpHistProduct'); if(sel){ sel.innerHTML = '<option value="">Selecione um produto</option>' + (PRODUCTS||[]).map(p=>`<option value="${p.id}">${esc(p.nome)}</option>`).join(''); sel.onchange = () => cmpRenderHistorico(sel.value); }
-    cmpRenderHistorico('');
-  }
-  async function cmpRenderHistorico(pid){
-    const body = $('#cmpHistBody'), empty = $('#cmpHistEmpty');
-    ['cmpHistCurrent','cmpHistVar','cmpHistMin','cmpHistMax'].forEach(id=>{ const e=$('#'+id); if(e) e.textContent='—'; });
-    if(!pid){ body.innerHTML=''; if(empty){ empty.style.display='block'; empty.textContent='Selecione um produto.'; } return; }
-    const r = await purchaseFlowRpc('erp_purchase_price_history_product',{ p_product:String(pid), p_limit:80 }, { silent:true });
-    if(r && r.missing){ if(empty){ empty.style.display='block'; empty.textContent='Aplique a migration purchase_compras_module no Supabase.'; } return; }
-    const rows = (r && r.data) || [];
-    if(!rows.length){ body.innerHTML=''; if(empty){ empty.style.display='block'; empty.textContent='Sem histórico de preço para este produto.'; } return; }
-    if(empty) empty.style.display='none';
-    const prices = rows.map(x=>Number(x.unit_price)||0);
-    $('#cmpHistCurrent').textContent = BRL(prices[0]);
-    $('#cmpHistMin').textContent = BRL(Math.min(...prices));
-    $('#cmpHistMax').textContent = BRL(Math.max(...prices));
-    const variation = prices.length>1 && prices[1]>0 ? ((prices[0]-prices[1])/prices[1]*100) : null;
-    $('#cmpHistVar').textContent = variation==null?'—':(variation>=0?'+':'')+variation.toFixed(1)+'%';
-    const srcName = s => ({receipt:'recebimento', approval:'aprovação', quotation:'cotação', import:'importação'}[s]||s);
-    body.innerHTML = rows.map((x,i) => { const prev = rows[i+1]?Number(rows[i+1].unit_price):null; const dv = prev&&prev>0?((Number(x.unit_price)-prev)/prev*100):null;
-      return `<tr><td>${fmtDT(x.recorded_at)}</td><td>${esc(cmpSupplierName(x.supplier_id))}</td>
-        <td class="r"><b>${BRL(x.unit_price)}</b></td>
-        <td class="r ${dv==null?'muted':dv>0?'neg':''}">${dv==null?'—':(dv>=0?'+':'')+dv.toFixed(1)+'%'}</td>
-        <td><span class="chip">${esc(srcName(x.source))}</span></td></tr>`; }).join('');
-  }
-
-  // =================== ALERTAS ===================
-  async function cmpRenderAlertas(){
-    const body = $('#cmpAlertasBody'), empty = $('#cmpAlertasEmpty'); if(!body) return;
-    body.innerHTML='<tr><td colspan="3" class="muted" style="text-align:center;padding:14px">Analisando…</td></tr>'; if(empty) empty.style.display='none';
-    await loadPurchaseWorkflowConfig().catch(()=>{});
-    const [alertsR, draftsR, rasc, pay] = await Promise.all([
-      purchaseFlowRpc('erp_purchase_price_alerts',{ p_limit:20 }, { silent:true }),
-      purchaseFlowRpc('erp_purchase_draft_list',{ p_status:'pending' }, { silent:true }),
-      sb.rpc('erp_po_list',{ p_status:'rascunho' }).catch(()=>({data:[]})),
-      sb.rpc('erp_payables_list',{ p_ini:null, p_fim:null, p_status:'abertas', p_store:null }).catch(()=>({data:[]}))
-    ]);
-    const priceAlerts = (alertsR && alertsR.data) || [];
-    const pendingDrafts = ((draftsR && draftsR.data) || []).length;
-    const rascunhos = (rasc.data||[]).length;
-    const overdue = (pay.data||[]).filter(x => x.fornecedor && x.atrasada);
-    const rows = [];
-    if(pendingDrafts) rows.push(`<tr class="clickrow" data-onclick="openBoPage('cmpAprovacao')"><td><span class="chip amber">aprovação</span></td><td>${pendingDrafts} pedido(s) aguardando aprovação</td><td class="r" data-onclick="event.stopPropagation()"><button class="btn ghost sm" data-onclick="openBoPage('cmpAprovacao')">Abrir</button></td></tr>`);
-    if(rascunhos) rows.push(`<tr class="clickrow" data-onclick="openBoPage('cmpAprovacao')"><td><span class="chip amber">rascunho</span></td><td>${rascunhos} rascunho(s) do Pedido inteligente aguardando decisão</td><td class="r" data-onclick="event.stopPropagation()"><button class="btn ghost sm" data-onclick="openBoPage('cmpAprovacao')">Abrir</button></td></tr>`);
-    if(overdue.length) rows.push(`<tr class="clickrow low" data-onclick="openBoPage('cmpFinanceiro')"><td><span class="chip warn">vencido</span></td><td>${overdue.length} boleto(s) de compra vencido(s) · total ${BRL(overdue.reduce((a,r)=>a+ +r.valor,0))}</td><td class="r" data-onclick="event.stopPropagation()"><button class="btn ghost sm" data-onclick="openBoPage('cmpFinanceiro')">Abrir</button></td></tr>`);
-    priceAlerts.forEach(a => { const p = cmpProd(a.product_id); rows.push(`<tr><td><span class="chip warn">+${fmtNum(a.increase_percent)}%</span></td><td>Aumento de custo · <b>${esc(p?p.nome:a.product_id)}</b> — de ${BRL(a.previous_price)} para ${BRL(a.current_price)}</td><td class="r muted">${fmtDT(a.recorded_at)}</td></tr>`); });
-    body.innerHTML = rows.join('');
-    if(empty) empty.style.display = rows.length ? 'none' : 'block';
-  }
-
-  // =================== AUDITORIA ===================
-  async function cmpRenderAuditoria(){
-    const body = $('#cmpAuditoriaBody'), empty = $('#cmpAuditoriaEmpty'); body.innerHTML='';
-    const r = await purchaseFlowRpc('erp_purchase_workflow_audit_list',{ p_limit:200 }, { silent:true });
-    if(r && r.missing){ if(empty){ empty.style.display='block'; empty.textContent='Aplique a migration do fluxo de compras no Supabase.'; } return; }
-    const rows = (r && r.data) || [];
-    const actionName = a => ({ workflow_config_updated:'Regras atualizadas', order_metadata_saved:'Pedido salvo', receipt_recorded:'Recebimento', order_approved:'Aprovação', quote_responses_saved:'Cotação salva', purchase_draft_saved:'Pedido enviado', purchase_draft_approved:'Pedido aprovado', purchase_draft_rejected:'Pedido rejeitado', purchase_draft_deleted:'Rascunho excluído' }[a] || a);
-    body.innerHTML = rows.map(x => `<tr><td>${fmtDT(x.created_at)}</td><td>${esc(actionName(x.action))}</td><td>${esc(x.entity_type||'—')}</td><td>${esc(x.entity_id||'—')}</td><td class="muted" style="font-size:12px">${esc(JSON.stringify(x.details||{}))}</td></tr>`).join('');
-    if(empty) empty.style.display = rows.length ? 'none' : 'block';
-  }
-
-  // =================== PAINEL ===================
-  async function cmpRenderPainel(){
-    const st = $('#cmpDashStats'); if(st) st.innerHTML = '<div class="stat"><div class="k">Carregando…</div><div class="v">—</div></div>';
-    const mes = mesAtualISO();
-    const [poR, draftsR, salesData] = await Promise.all([
-      sb.rpc('erp_po_list',{ p_status:null }).catch(()=>({data:[]})),
-      purchaseFlowRpc('erp_purchase_draft_list',{ p_status:'pending' }, { silent:true }),
-      cmpEnsureSales(true)
-    ]);
-    const pos = poR.data || [];
-    const inMonth = d => { const s = String(d||''); return s >= mes.ini && s <= mes.fim+'T23:59:59'; };
-    const comprasMes = pos.filter(p => p.status!=='cancelado' && p.status!=='rascunho' && inMonth(p.created_at)).reduce((a,p)=>a+ +p.total_previsto,0);
-    const recebidoMes = pos.filter(p => inMonth(p.received_at||'')).reduce((a,p)=>a+ +p.total_recebido,0);
-    const pendentes = pos.filter(p => p.status==='rascunho').length + (((draftsR&&draftsR.data)||[]).length);
-    const divergencias = pos.filter(p => p.status==='parcial').length;
-    if(st) st.innerHTML = `
-      <div class="stat acc"><div class="k">Compras no mês</div><div class="v">${BRL(comprasMes)}</div></div>
-      <div class="stat"><div class="k">Pedidos pendentes</div><div class="v">${pendentes}</div></div>
-      <div class="stat"><div class="k">Recebido no mês</div><div class="v">${BRL(recebidoMes)}</div></div>
-      <div class="stat warn"><div class="k">Entregas parciais</div><div class="v">${divergencias}</div></div>`;
-    // compras por fornecedor
-    const bySup = {}; pos.filter(p => p.status!=='cancelado' && p.status!=='rascunho').forEach(p => { const k = p.fornecedor||'—'; bySup[k] = (bySup[k]||0) + (+p.total_previsto||0); });
-    const supArr = Object.entries(bySup).sort((a,b)=>b[1]-a[1]).slice(0,10);
-    const supBox = $('#cmpDashSuppliers');
-    if(supBox) supBox.innerHTML = supArr.length ? supArr.map(([nome,val]) => `<tr><td>${esc(nome)}</td><td class="r"><b>${BRL(val)}</b></td></tr>`).join('') : '<tr><td colspan="2" class="muted" style="text-align:center;padding:14px">Sem compras registradas.</td></tr>';
-    // ABC (vendas do onpdv)
-    const abcBox = $('#cmpDashAbc'), scope = $('#cmpDashAbcScope');
-    let abc = []; try{ const r = await sb.rpc('erp_abc',{ p_ini:mes.ini, p_fim:mes.fim, p_store:CURRENT_STORE }); abc = r.data||[]; }catch(e){}
-    if(scope) scope.textContent = 'mês atual';
-    if(abcBox) abcBox.innerHTML = abc.slice(0,10).map(r => `<tr><td>${esc(r.nome)}</td><td>${cmpAbcChip(r.classe)}</td><td class="r">${BRL(r.faturamento)}</td></tr>`).join('') || '<tr><td colspan="3" class="muted" style="text-align:center;padding:14px">Sem vendas no período.</td></tr>';
-  }
-
-  // =================== ROTEAMENTO ===================
-  window.CMP_PAGES = {
-    cmpPainel: cmpRenderPainel,
-    cmpLista: () => cmpRenderLista('geral'),
-    cmpListaIconha: () => cmpRenderLista('iconha'),
-    cmpListaReta: () => cmpRenderLista('reta'),
-    cmpCatalogo: cmpRenderCatalogo,
-    cmpPedido: cmpRenderPedido,
-    cmpAprovacao: cmpRenderAprovacao,
-    cmpRecebimento: cmpRenderRecebimento,
-    cmpConcluido: cmpRenderConcluido,
-    cmpFinanceiro: cmpRenderFinanceiro,
-    cmpFornecedores: cmpRenderFornecedores,
-    cmpCotacoes: cmpRenderCotacoesForm,
-    cmpHistorico: cmpRenderHistoricoInit,
-    cmpAlertas: cmpRenderAlertas,
-    cmpAuditoria: cmpRenderAuditoria
-  };
-  // expõe render p/ os botões "Atualizar" declarativos
-  Object.assign(window, { cmpRenderAprovacao, cmpRenderRecebimento, cmpRenderConcluido, cmpRenderFinanceiro, cmpRenderFornecedores, cmpRenderCotacoes, cmpRenderAlertas, cmpRenderAuditoria });
-})();
+  COMPRAS_LOADING.then(abrir).catch(err=>{
+    if(host) host.innerHTML='<div class="card pad">Não foi possível abrir o módulo de Compras. Verifique a conexão e tente de novo.</div>';
+    toast(err.message,true);
+  });
+}

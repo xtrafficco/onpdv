@@ -13,6 +13,7 @@ const SHELL = [
   './assets/js/onpdv-bootstrap.js',
   './assets/js/onpdv-app.js',
   './assets/js/onpdv-raiox.js',
+  './assets/js/onpdv-compras.js',
   './assets/css/onpdv-raiox.css',
   './partials/onpdv-app.html',
   './entregador.html',
