@@ -64,7 +64,7 @@
       ]
     },
     {
-      "source": "/:page(index|cliente|entregador|vitrine).html",
+      "source": "/:page(index|cliente|entregador|vitrine|pedido).html",
       "headers": [
         {
           "key": "Cache-Control",
@@ -73,7 +73,7 @@
       ]
     },
     {
-      "source": "/:page(cliente|entregador|vitrine)",
+      "source": "/:page(cliente|entregador|vitrine|pedido)",
       "headers": [
         {
           "key": "Cache-Control",

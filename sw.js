@@ -3,7 +3,7 @@
 //  • entregador.html → app do entregador
 // Estratégia: navegação = network-first (pega a versão nova; cai no cache quando offline);
 // estáticos (ícones, lib) = cache-first. Chamadas ao Supabase NUNCA são cacheadas.
-const CACHE = 'onpdv-2026.09.14-v57';
+const CACHE = 'onpdv-2026.09.15-v58';
 // supabase-js fixado (mesma versão+SRI do HTML): pré-cacheado para os apps abrirem
 // offline mesmo se a CDN estiver fora do ar.
 const SUPABASE_LIB = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.8';
@@ -25,6 +25,10 @@ const SHELL = [
   './assets/js/entregador.js',
   './assets/js/vitrine.js',
   './assets/js/cliente.js',
+  // Pedido pelo site: a casca abre offline e avisa que precisa de internet, em vez de
+  // cair na tela de login do caixa (que era o fallback de qualquer caminho desconhecido).
+  './pedido.html',
+  './assets/js/pedido.js',
   './manifest.webmanifest',
   './app.webmanifest',
   './vitrine.webmanifest',
@@ -84,6 +88,7 @@ self.addEventListener('fetch', (e) => {
     const fallback = url.pathname.includes('entregador') ? './entregador.html'
       : url.pathname.includes('vitrine') ? './vitrine.html'
       : url.pathname.includes('cliente') ? './cliente.html'
+      : url.pathname.includes('pedido') ? './pedido.html'
       : './index.html';
     e.respondWith(
       fetch(req).then((res) => {

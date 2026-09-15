@@ -661,14 +661,14 @@ function openBoPage(pg){
   if(pg==='relatorio'){ loadDash(); loadReport(); }
   if(pg==='raiox') openRaioX();
   if(pg==='pedidos') loadOrders();
-  if(pg==='entregas'){ loadDeliveries(); trkStart(); }
+  if(pg==='entregas'){ loadDeliveries(); trkStart(); sitePedRender(); sitePedCarregar(); }
   if(pg==='pagar') loadPayables();
   if(pg==='pagarcrm') renderCrmPay();
   if(pg==='transfer') loadTransfers();
   if(pg==='gaveta'){ refreshCash(true); loadCashHistory(); }
   if(pg==='operacoes') loadOpsCenter();
   if(pg==='prevencao') loadLossPrevention();
-  if(pg==='config'){ renderPdvTerminalsConfig(); renderTerminals(); renderStores(); renderUsers(); loadCashbackConfigCard(); renderPushCard(); renderCollectionsPixCard(); }
+  if(pg==='config'){ renderPdvTerminalsConfig(); renderTerminals(); renderStores(); renderUsers(); loadCashbackConfigCard(); renderPushCard(); renderCollectionsPixCard(); renderSiteConfigCard(); }
   if(pg.startsWith('cmp')) openCompras(pg);
 }
 /* Raio-X Financeiro: motor pesado (~120 KB) carregado só quando a aba abre.
@@ -712,7 +712,8 @@ async function checkPickups(){
   if(!CURRENT_STORE) return;
   const { data } = await sb.rpc('erp_pending_pickups',{ p_store:CURRENT_STORE });
   PENDING_PICKUPS = +data||0;
-  const nav=$('.bo-nav button[data-page="entregas"]'); if(nav) nav.classList.toggle('blink', PENDING_PICKUPS>0);
+  const nav=$('.bo-nav button[data-page="entregas"]'); if(nav) nav.classList.toggle('blink', PENDING_PICKUPS>0 || SITE_PED.pendentes>0);
+  sitePedCarregar();   // pedidos do site entram na mesma rodada de 15 s, com aviso sonoro
 }
 function startPickupPoll(){ clearInterval(pickupTimer); checkPickups(); pickupTimer=setInterval(checkPickups, 15000); }
 // ======================= DATA LOADERS =======================
@@ -1039,7 +1040,7 @@ window.pdvOfflineCacheState = function(){
 // ============ CHECAGEM DE NOVA VERSÃO (caixa instalado) ============
 // O caixa roda dos arquivos locais; para saber se saiu versão nova, consulta o version.json
 // do site publicado e avisa (com link para baixar o instalador). Não aplica sozinho.
-const ONPDV_VERSION='2026.09.14-v57';
+const ONPDV_VERSION='2026.09.15-v58';
 const ONPDV_SITE='https://onpdv.vercel.app';
 // O badge do card "Instalador da Frente de Caixa" mostra a mesma versão. Preenchemos
 // por aqui para não existir um segundo lugar no código que alguém precise lembrar de
@@ -1807,6 +1808,7 @@ function renderCaixa(){
       +'<button class="pdv-action" data-onclick="cfdPairModal()" title="Segunda tela do cliente (tablet/monitor) — carrinho ao vivo e CPF/cashback">📺 Vitrine</button>'
       +'<button class="pdv-action" data-onclick="pdvHeldModal()">⏸ Espera '+(PDV.held.length?'<span class="pdv-chip">'+PDV.held.length+'</span>':'')+'</button>'
       +(can('pdv_fila')?'<button class="pdv-action '+(readyPix?'attention':'')+'" data-onclick="'+(readyPix?'pdvDeliveryPixQueueModal()':'pdvDeliveryQueue()')+'">🚚 '+(readyPix?'PIX pago · preparar entrega':'Fila de entrega')+' '+((readyPix||PDV.delivN||0)?'<span class="pdv-chip">'+(readyPix||PDV.delivN)+'</span>':'')+'</button>':'')
+      +(can('pdv_fila')&&SITE_PED.carregado?'<button class="pdv-action '+(SITE_PED.pendentes?'attention':'')+'" data-onclick="sitePedAbrir()">🛒 Pedidos do site '+(SITE_PED.pendentes?'<span class="pdv-chip">'+SITE_PED.pendentes+'</span>':'')+'</button>':'')
     +'</div>'
     +'<a data-onclick="pdvExit()" style="color:#fff;cursor:pointer;font-weight:800">Sair do caixa ✕</a>'
     +'<span class="sep">|</span><span id="pdvClock"></span>'
@@ -9731,6 +9733,363 @@ async function renderPushCard(){
   }
 }
 window.pushEnable=pushEnable; window.pushDisable=pushDisable; window.pushToggle=pushToggle; window.renderPushCard=renderPushCard;
+
+// ======================= PEDIDOS DO SITE (link no WhatsApp) =======================
+// O cliente pede em pedido.html (link da mensagem de saudação do WhatsApp Business). O
+// pedido fica pendente em site_pedidos até alguém aceitar aqui. Aceitar cria a entrega
+// pela erp_delivery_create de sempre: estoque baixado, "a cobrar", fila do motoboy.
+// Avisar o cliente é um link wa.me que o operador manda pelo WhatsApp Business da loja —
+// sem API e sem custo por mensagem.
+let SITE_PED = { pendentes:0, lista:[], carregado:false, indisponivel:false };
+let SITE_CFG = null;
+let SITE_SOM = null;
+
+// O navegador só libera áudio depois de um clique na página. No caixa o operador clica
+// o tempo todo, então o contexto nasce no primeiro clique e fica pronto para o aviso.
+document.addEventListener('pointerdown', ()=>{
+  try{
+    const Ctx=window.AudioContext||window.webkitAudioContext; if(!Ctx) return;
+    if(!SITE_SOM) SITE_SOM=new Ctx(); else if(SITE_SOM.state==='suspended') SITE_SOM.resume();
+  }catch(_){}
+}, { passive:true });
+
+function siteAvisoSonoro(){
+  try{
+    if(!SITE_SOM || SITE_SOM.state!=='running') return;
+    const t0=SITE_SOM.currentTime;
+    [[0,880],[0.22,1175]].forEach(([d,f])=>{
+      const o=SITE_SOM.createOscillator(), g=SITE_SOM.createGain();
+      o.type='sine'; o.frequency.value=f;
+      g.gain.setValueAtTime(0.0001,t0+d);
+      g.gain.exponentialRampToValueAtTime(0.3,t0+d+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t0+d+0.2);
+      o.connect(g); g.connect(SITE_SOM.destination); o.start(t0+d); o.stop(t0+d+0.22);
+    });
+  }catch(_){}
+}
+
+async function sitePedCarregar(){
+  if(!sb || SITE_PED.indisponivel) return;
+  try{
+    const { data, error } = await sb.rpc('erp_site_pedidos',{ p_store:CURRENT_STORE||null, p_status:'todos', p_dias:1 });
+    if(error){
+      // Função ainda não existe no banco (migration não aplicada): para de perguntar.
+      if(error.code==='PGRST202'){ SITE_PED.indisponivel=true; return; }
+      throw error;
+    }
+    const antes=SITE_PED.pendentes;
+    SITE_PED={ pendentes:+(data&&data.pendentes)||0, lista:(data&&data.pedidos)||[], carregado:true, indisponivel:false };
+    if(SITE_PED.pendentes>antes) siteAvisoSonoro();
+    const nav=$('.bo-nav button[data-page="entregas"]');
+    if(nav) nav.classList.toggle('blink', PENDING_PICKUPS>0 || SITE_PED.pendentes>0);
+    if(antes!==SITE_PED.pendentes && currentPage==='caixa' && !document.getElementById('pdvOv')) renderCaixa();
+    sitePedRender();
+  }catch(e){ /* offline ou erro momentâneo: a próxima rodada tenta de novo */ }
+}
+
+function sitePedFone(t){
+  const d=String(t||'').replace(/\D/g,'');
+  if(d.length===11) return '('+d.slice(0,2)+') '+d.slice(2,7)+'-'+d.slice(7);
+  if(d.length===10) return '('+d.slice(0,2)+') '+d.slice(2,6)+'-'+d.slice(6);
+  return d;
+}
+function sitePedNomeLoja(p){
+  const nome=(COMPANY&&COMPANY.pdv_config&&COMPANY.pdv_config.pedido_site&&COMPANY.pdv_config.pedido_site.nome)||'';
+  return (nome?nome+' ':'')+(p.loja||'');
+}
+function sitePedMensagem(p, tipo){
+  const primeiroNome=String(p.nome||'').trim().split(/\s+/)[0]||'';
+  const ola='Olá, '+primeiroNome+'! Aqui é da '+sitePedNomeLoja(p).trim()+'.';
+  if(tipo==='aceito') return ola+' Confirmamos seu pedido '+p.codigo+' ('+BRL(p.total)+'). Já estamos separando e avisamos quando sair para entrega.';
+  if(tipo==='recusado') return ola+' Infelizmente não conseguimos atender o pedido '+p.codigo+': '+(p.motivo||'')+'. Se quiser, seguimos a conversa por aqui.';
+  return ola+' Sobre o seu pedido '+p.codigo+':';
+}
+function sitePedLinkZap(p, tipo){
+  const d=String(p.telefone||'').replace(/\D/g,'');
+  return d ? 'https://wa.me/55'+d+'?text='+encodeURIComponent(sitePedMensagem(p,tipo)) : '';
+}
+const SITE_PAG={ dinheiro:'Dinheiro', cartao:'Cartão', pix:'PIX' };
+
+function sitePedLinhaHtml(p, ui){
+  const pdv=ui==='pdv';
+  const bt=(tipo)=>pdv
+    ? { ok:'pdv-btn solid mini', neutro:'pdv-btn ghost mini', perigo:'pdv-btn ghost mini pdv-danger' }[tipo]
+    : { ok:'btn green sm', neutro:'btn ghost sm', perigo:'btn ghost red sm' }[tipo];
+  const chip={ pendente:'<span class="chip warn">aguardando</span>', aceito:'<span class="chip ok">aceito</span>',
+    recusado:'<span class="chip">recusado</span>', cancelado:'<span class="chip">cancelado</span>' }[p.status]||'';
+  const qtd=(it)=>String(it.unidade||'').toUpperCase()==='KG' ? String(it.qtd).replace('.',',')+' kg' : it.qtd+'×';
+  const onde=[p.endereco, p.bairro, p.complemento].filter(Boolean).map(esc).join(' · ');
+  const verificado=p.distancia_km!=null
+    ? '<span class="sp-mut">'+String(p.distancia_km).replace('.',',')+' km da loja</span>'
+    : '<span class="sp-mut">endereço não verificado · o cliente escolheu a loja</span>';
+  return '<div class="sp-ped '+esc(p.status)+'">'
+    +'<div class="sp-ped-topo"><b>'+esc(p.codigo)+'</b>'+chip
+      +'<span class="sp-mut">há '+(p.minutos<60?p.minutos+' min':Math.floor(p.minutos/60)+' h')+'</span>'
+      +(isAdmin()&&!CURRENT_STORE?'<span class="sp-mut">· loja '+esc(p.loja)+'</span>':'')
+      +'<span class="grow"></span><b>'+BRL(p.total)+'</b></div>'
+    +'<div style="margin-top:6px"><b>'+esc(p.nome)+'</b> · '+esc(sitePedFone(p.telefone))+'</div>'
+    +'<div>'+onde+'<br>'+verificado+'</div>'
+    +'<ul class="sp-ped-itens">'+(p.itens||[]).map(it=>'<li>'+esc(qtd(it))+' '+esc(it.nome)+' · '+BRL(it.subtotal)+'</li>').join('')+'</ul>'
+    +'<div class="sp-mut">Produtos '+BRL(p.subtotal)+' · entrega '+BRL(p.frete)+' · pagar na entrega: <b>'+esc(SITE_PAG[p.pagamento]||p.pagamento)+'</b>'
+      +(p.troco_para?' (troco para '+BRL(p.troco_para)+')':'')+'</div>'
+    +(p.obs?'<div style="margin-top:4px">📝 '+esc(p.obs)+'</div>':'')
+    +(p.status==='recusado'&&p.motivo?'<div style="margin-top:4px">Motivo: '+esc(p.motivo)+'</div>':'')
+    +'<div class="sp-ped-acoes">'
+      +(p.status==='pendente'
+        ?'<button class="'+bt('ok')+'" data-onclick="sitePedAceitar(\''+p.id+'\')">Aceitar e criar entrega</button>'
+          +'<button class="'+bt('perigo')+'" data-onclick="sitePedRecusar(\''+p.id+'\')">Recusar</button>'
+        :'')
+      +'<button class="'+bt('neutro')+'" data-onclick="sitePedZap(\''+p.id+'\')">WhatsApp do cliente</button>'
+    +'</div></div>';
+}
+
+function sitePedRender(){
+  for(const [id, ui] of [['sitePedCard','erp'],['sitePedBox','pdv']]){
+    const box=document.getElementById(id); if(!box) continue;
+    const lista=SITE_PED.lista||[];
+    box.innerHTML = SITE_PED.indisponivel
+      ? '<p class="'+(ui==='pdv'?'pdv-note':'muted')+'">O pedido pelo site ainda não foi ligado no banco.</p>'
+      : !SITE_PED.carregado ? '<p class="'+(ui==='pdv'?'pdv-note':'muted')+'">Carregando…</p>'
+      : lista.length ? lista.map(p=>sitePedLinhaHtml(p,ui)).join('')
+      : '<p class="'+(ui==='pdv'?'pdv-note':'muted')+'">Nenhum pedido do site nas últimas 24 horas. Os novos aparecem aqui sozinhos, com aviso sonoro.</p>';
+  }
+  const chip=$('#sitePedChip');
+  if(chip){ chip.textContent=SITE_PED.pendentes?SITE_PED.pendentes+' aguardando':'em dia'; chip.className='chip '+(SITE_PED.pendentes?'warn':'ok'); }
+}
+
+async function sitePedOferecerZap(p, tipo){
+  const link=sitePedLinkZap(p,tipo); if(!link) return;
+  const texto=tipo==='aceito'
+    ? 'Avise '+p.nome+' que o pedido foi confirmado.'
+    : 'Avise '+p.nome+' que o pedido não pôde ser atendido.';
+  if(await uiConfirm(texto+'\n\nA mensagem abre pronta no WhatsApp da loja; é só enviar.',{ title:'Avisar o cliente', okText:'Abrir WhatsApp', cancelText:'Agora não' })){
+    window.open(link,'_blank','noopener');
+  }
+}
+
+window.sitePedAbrir = ()=>{
+  pdvModal('Pedidos do site 🛒','<div id="sitePedBox"></div>',true);
+  sitePedRender(); sitePedCarregar();
+};
+window.sitePedAtualizar = ()=> sitePedCarregar();
+
+window.sitePedAceitar = async (id)=>{
+  const p=(SITE_PED.lista||[]).find(x=>x.id===id); if(!p) return;
+  const ok=await uiConfirm('Aceitar o pedido '+p.codigo+' de '+p.nome+'?\n\n'
+    +'Vai criar a entrega de '+BRL(p.total)+' "a cobrar" na fila do motoboy e baixar o estoque dos produtos. Confira antes se tem tudo na loja.',
+    { title:'Aceitar pedido do site', okText:'Aceitar e criar entrega' });
+  if(!ok) return;
+  const { data, error } = await sb.rpc('erp_site_pedido_aceitar',{ p_id:id });
+  if(error){ toast('Não foi possível aceitar: '+error.message,true); sitePedCarregar(); return; }
+  toast('Pedido '+p.codigo+' aceito · entrega #'+((data&&data.numero)||'')+' na fila');
+  await sitePedCarregar();
+  if(typeof pdvDelivCount==='function') pdvDelivCount();
+  if(currentPage==='entregas' && typeof loadDeliveries==='function') loadDeliveries(true);
+  sitePedOferecerZap(p,'aceito');
+};
+
+window.sitePedRecusar = async (id)=>{
+  const p=(SITE_PED.lista||[]).find(x=>x.id===id); if(!p) return;
+  const motivo=await uiPrompt('Por que o pedido '+p.codigo+' não pode ser atendido?\nO cliente vê este motivo na página do pedido.',
+    'Produto em falta',{ title:'Recusar pedido do site', okText:'Recusar pedido' });
+  if(motivo==null) return;
+  const { error } = await sb.rpc('erp_site_pedido_recusar',{ p_id:id, p_motivo:motivo });
+  if(error){ toast('Não foi possível recusar: '+error.message,true); return; }
+  toast('Pedido '+p.codigo+' recusado');
+  await sitePedCarregar();
+  sitePedOferecerZap(Object.assign({},p,{ motivo:String(motivo).trim() }),'recusado');
+};
+
+window.sitePedZap = (id)=>{
+  const p=(SITE_PED.lista||[]).find(x=>x.id===id); if(!p) return;
+  const link=sitePedLinkZap(p,'contato'); if(link) window.open(link,'_blank','noopener');
+};
+
+// ---- Configurações → Pedido pelo site ----
+// Dias na ordem em que a loja pensa (segunda primeiro); a chave é a do JavaScript (0 = domingo).
+const SITE_DIAS=[[1,'Seg'],[2,'Ter'],[3,'Qua'],[4,'Qui'],[5,'Sex'],[6,'Sáb'],[0,'Dom']];
+
+/** "08:00" → "8h"; "08:30" → "8h30". Igual ao fmtHora da página de pedido. */
+function siteHoraCurta(hhmm){
+  const m=/^(\d{2}):(\d{2})$/.exec(String(hhmm||'')); if(!m) return '';
+  return Number(m[1])+'h'+(m[2]==='00'?'':m[2]);
+}
+
+/**
+ * Texto do horário que o cliente lê, gerado do horário por dia:
+ * {"1":["08:00","19:00"],…,"6":["08:00","13:00"]} → "Seg a sex 8h às 19h · Sáb 8h às 13h".
+ * Dias seguidos com o mesmo horário viram um grupo; dia fechado não aparece.
+ */
+function siteHorarioResumo(h){
+  if(!h || typeof h!=='object') return '';
+  const grupos=[];
+  for(const [dia,nome] of SITE_DIAS){
+    const f=h[String(dia)];
+    const faixa=Array.isArray(f)&&f.length===2 ? f[0]+'-'+f[1] : null;
+    const ult=grupos[grupos.length-1];
+    if(faixa && ult && ult.faixa===faixa && ult.fim===SITE_DIAS.findIndex(x=>x[0]===dia)-1){
+      ult.fim++; ult.nomes.push(nome);
+    }else if(faixa){
+      grupos.push({ faixa, abre:f[0], fecha:f[1], fim:SITE_DIAS.findIndex(x=>x[0]===dia), nomes:[nome] });
+    }
+  }
+  return grupos.map(g=>{
+    const n=g.nomes, dias=n.length===1 ? n[0] : n.length===2 ? n[0]+' e '+n[1].toLowerCase() : n[0]+' a '+n[n.length-1].toLowerCase();
+    return dias+' '+siteHoraCurta(g.abre)+' às '+siteHoraCurta(g.fecha);
+  }).join(' · ');
+}
+
+/**
+ * Código curto da loja para o link ?loja=: o começo do id, com 8 caracteres ou mais
+ * até não bater com nenhuma outra loja. A página de pedido faz a busca inversa
+ * (encontrarLojaPorLink em assets/js/pedido.js).
+ */
+function siteCodigoLoja(id, todosIds){
+  const alvo=String(id||'').toLowerCase();
+  const outros=(todosIds||[]).map(x=>String(x).toLowerCase()).filter(x=>x!==alvo);
+  for(let n=8;n<=alvo.length;n++){
+    const pre=alvo.slice(0,n);
+    if(pre.endsWith('-')) continue;
+    if(!outros.some(o=>o.startsWith(pre))) return pre;
+  }
+  return alvo;
+}
+
+function siteHorariosDoForm(i){
+  if(!($('#spc_'+i+'_temhor')||{}).checked) return null;
+  const h={};
+  for(const [dia] of SITE_DIAS){
+    const aberto=($('#spc_'+i+'_d'+dia)||{}).checked;
+    h[String(dia)] = aberto ? [($('#spc_'+i+'_d'+dia+'a')||{}).value||'', ($('#spc_'+i+'_d'+dia+'f')||{}).value||''] : null;
+  }
+  return h;
+}
+
+function siteAtualizarResumoHorario(i){
+  const alvo=$('#spcHorResumo_'+i); if(!alvo) return;
+  const h=siteHorariosDoForm(i), txt=siteHorarioResumo(h);
+  alvo.textContent = h ? (txt||'nenhum dia aberto') : 'horário não informado';
+  const dias=$('#spc_'+i+'_dias'); if(dias) dias.hidden=!h;
+}
+
+async function renderSiteConfigCard(){
+  const body=$('#spcBody'), st=$('#spcStatus'); if(!body) return;
+  const { data, error } = await sb.rpc('erp_site_config');
+  if(error){
+    body.innerHTML = error.code==='PGRST202'
+      ? '<p class="muted">Aplique a migration <b>20260915214042_pedido_site.sql</b> no Supabase e publique a função <b>pedido-site</b> para ligar o pedido pelo site.</p>'
+      : '<p class="muted">Não foi possível carregar: '+esc(error.message)+'</p>';
+    if(st){ st.textContent='indisponível'; st.className='chip'; }
+    return;
+  }
+  SITE_CFG=data||{};
+  const lojas=SITE_CFG.lojas||[], cats=SITE_CFG.categorias||[];
+  const ativas=lojas.filter(l=>l.ativo).length;
+  if(st){ st.textContent=ativas?ativas+' loja(s) recebendo':'desligado'; st.className='chip '+(ativas?'ok':''); }
+  const link=ONPDV_SITE+'/pedido';
+  const nome=SITE_CFG.nome_exibicao||'nossa loja';
+  const idsLojas=lojas.map(l=>l.store_id);
+  const saudacaoPara=(url)=>'Olá! 🐾 Obrigado por falar com a '+nome+'.\nFaça seu pedido por aqui e receba em casa:\n'+url+'\n\nSe preferir, é só responder esta mensagem.';
+  const valor=v=>esc(String(v==null?'':v).replace('.',','));
+  const podeEditar=isAdmin();
+  const dis=podeEditar?'':'disabled';
+  // Loja sem horário cadastrado abre o editor com um ponto de partida comum; só vale
+  // depois que alguém marca "Informar horário" e salva.
+  const PADRAO_HOR={'1':['08:00','18:00'],'2':['08:00','18:00'],'3':['08:00','18:00'],'4':['08:00','18:00'],'5':['08:00','18:00'],'6':['08:00','18:00'],'0':null};
+  body.innerHTML=`
+    <div class="field"><label class="lbl" for="spcNome">Nome mostrado no site</label>
+      <input id="spcNome" class="in" maxlength="60" value="${esc(SITE_CFG.nome_exibicao||'')}" placeholder="${esc(SITE_CFG.razao_social||'Ex.: Petville')}" ${podeEditar?'':'disabled'}></div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Loja</th><th>Recebe pedidos</th><th class="r">Raio (km)</th><th class="r">Entrega R$</th><th class="r">Mínimo R$</th><th>WhatsApp da loja</th></tr></thead>
+      <tbody>${lojas.map((l,i)=>`<tr>
+        <td><b>${esc(l.nome)}</b>${l.tem_coordenada?'':'<br><span class="chip warn">sem localização no cadastro</span>'}</td>
+        <td><input type="checkbox" id="spc_${i}_ativo" aria-label="${esc(l.nome)} recebe pedidos pelo site" ${l.ativo?'checked':''} ${podeEditar?'':'disabled'}></td>
+        <td class="r"><input class="in" id="spc_${i}_raio" inputmode="decimal" style="max-width:80px;text-align:right" value="${valor(l.raio_km)}" aria-label="Raio de entrega da ${esc(l.nome)} em km" ${podeEditar?'':'disabled'}></td>
+        <td class="r"><input class="in" id="spc_${i}_frete" inputmode="decimal" style="max-width:90px;text-align:right" value="${valor(l.frete)}" aria-label="Taxa de entrega da ${esc(l.nome)}" ${podeEditar?'':'disabled'}></td>
+        <td class="r"><input class="in" id="spc_${i}_minimo" inputmode="decimal" style="max-width:90px;text-align:right" value="${valor(l.pedido_minimo)}" aria-label="Pedido mínimo da ${esc(l.nome)}" ${podeEditar?'':'disabled'}></td>
+        <td><input class="in" id="spc_${i}_zap" inputmode="tel" style="min-width:150px" value="${esc(l.whatsapp?sitePedFone(String(l.whatsapp).replace(/^55/,'')):'')}" placeholder="(21) 99999-9999" aria-label="WhatsApp da ${esc(l.nome)}" ${podeEditar?'':'disabled'}></td>
+      </tr>`).join('')}</tbody></table></div>
+    <h3 style="margin:16px 0 4px">Horário de funcionamento</h3>
+    <p class="muted">Com o horário informado, a página avisa quando a loja está fechada e quando abre. O cliente continua podendo pedir: a loja confirma quando abrir.</p>
+    ${lojas.map((l,i)=>{
+      const h=l.horarios&&typeof l.horarios==='object' ? l.horarios : null, base=h||PADRAO_HOR;
+      return `<details class="spc-hor">
+        <summary><b>${esc(l.nome)}</b> · <span class="muted" id="spcHorResumo_${i}">${h?esc(siteHorarioResumo(h)||'nenhum dia aberto'):'horário não informado'}</span></summary>
+        <label class="chk" for="spc_${i}_temhor"><input type="checkbox" id="spc_${i}_temhor" data-hor="${i}" ${h?'checked':''} ${dis}> Informar horário desta loja</label>
+        <div class="spc-dias" id="spc_${i}_dias" ${h?'':'hidden'}>
+          ${SITE_DIAS.map(([dia,nomeDia])=>{
+            const f=base[String(dia)], ab=Array.isArray(f);
+            return `<div class="spc-dia">
+              <label class="chk" for="spc_${i}_d${dia}"><input type="checkbox" id="spc_${i}_d${dia}" data-hor="${i}" ${ab?'checked':''} ${dis}> ${nomeDia}</label>
+              <input type="time" class="in" id="spc_${i}_d${dia}a" data-hor="${i}" value="${ab?esc(f[0]):'08:00'}" aria-label="${esc(l.nome)}: ${nomeDia} abre" ${dis}>
+              <span class="muted">às</span>
+              <input type="time" class="in" id="spc_${i}_d${dia}f" data-hor="${i}" value="${ab?esc(f[1]):'18:00'}" aria-label="${esc(l.nome)}: ${nomeDia} fecha" ${dis}>
+            </div>`;}).join('')}
+        </div>
+      </details>`;}).join('')}
+    <h3 style="margin:16px 0 4px">Categorias fora do site</h3>
+    <p class="muted">Remédio e defensivo vêm marcados: venda que pode exigir receita não deveria sair de um carrinho sem ninguém olhar.</p>
+    <div class="spc-cats">${cats.map((c,i)=>`<label class="chk" for="spcCat_${i}"><input type="checkbox" id="spcCat_${i}" value="${esc(c.nome)}" ${c.oculta?'checked':''} ${podeEditar?'':'disabled'}> ${esc(c.nome)} <span class="muted">(${c.produtos})</span></label>`).join('')}</div>
+    ${podeEditar?'<div class="pdv-btns"><button class="btn" data-onclick="siteConfigSalvar()">Salvar configuração</button></div>':'<p class="muted">Só o administrador altera esta configuração.</p>'}
+    <h3 style="margin:22px 0 4px">Link e mensagem de saudação de cada loja</h3>
+    <p class="muted">Use no WhatsApp de cada loja o link <b>dela</b>: quem escreveu para a loja já escolheu a loja, e o link leva direto para os produtos, sem pedir a localização.</p>
+    ${lojas.map((l,i)=>{
+      const url=link+'?loja='+siteCodigoLoja(l.store_id,idsLojas);
+      return `<div class="spc-link">
+        <div class="spc-link-topo"><b>${esc(l.nome)}</b>${l.ativo?'':' <span class="chip warn">ainda não recebe pedidos — o link mostra a lista de lojas</span>'}</div>
+        <div class="field"><label class="lbl" for="spcLink_${i}">Link do pedido</label>
+          <div style="display:flex;gap:8px"><input id="spcLink_${i}" class="in" readonly value="${esc(url)}"><button class="btn ghost" data-onclick="siteCopiar('spcLink_${i}')">Copiar</button></div></div>
+        <div class="field"><label class="lbl" for="spcSaudacao_${i}">Mensagem de saudação do WhatsApp Business</label>
+          <textarea id="spcSaudacao_${i}" class="in" rows="5" readonly>${esc(saudacaoPara(url))}</textarea>
+          <button class="btn ghost" style="margin-top:6px" data-onclick="siteCopiar('spcSaudacao_${i}')">Copiar mensagem</button></div>
+      </div>`;}).join('')}
+    <div class="field"><label class="lbl" for="spcLink">Link geral (o cliente escolhe a loja) — para Instagram, cartão, panfleto</label>
+      <div style="display:flex;gap:8px"><input id="spcLink" class="in" readonly value="${esc(link)}"><button class="btn ghost" data-onclick="siteCopiar('spcLink')">Copiar</button></div></div>
+    <p class="muted">No celular da loja: <b>WhatsApp Business → Ferramentas comerciais → Mensagem de saudação</b>, ative e cole o texto. Ela vai sozinha para quem escreve pela primeira vez ou depois de 14 dias sem conversar. Para quem conversou há menos tempo, crie uma <b>Resposta rápida</b> (por exemplo, <b>/pedido</b>) com o mesmo texto, e coloque o link no campo <b>Site</b> do perfil comercial.</p>`;
+  // Resumo do horário acompanha o que é marcado, antes de salvar.
+  const aoMudarHorario=ev=>{ const i=ev.target&&ev.target.dataset?ev.target.dataset.hor:null; if(i!=null) siteAtualizarResumoHorario(i); };
+  body.oninput=aoMudarHorario;
+  body.onchange=aoMudarHorario;
+}
+
+window.siteConfigSalvar = async ()=>{
+  if(!SITE_CFG) return;
+  const lojas=(SITE_CFG.lojas||[]).map((l,i)=>({
+    store_id:l.store_id,
+    ativo:!!($('#spc_'+i+'_ativo')||{}).checked,
+    raio_km:num(($('#spc_'+i+'_raio')||{}).value),
+    frete:num(($('#spc_'+i+'_frete')||{}).value),
+    pedido_minimo:num(($('#spc_'+i+'_minimo')||{}).value),
+    whatsapp:($('#spc_'+i+'_zap')||{}).value||'',
+    horarios:siteHorariosDoForm(i)
+  }));
+  const ruim=lojas.find(l=>l.ativo && !(l.raio_km>0 && l.raio_km<=50));
+  if(ruim){ toast('O raio de entrega precisa ficar entre 0,1 e 50 km.',true); return; }
+  for(const [i,l] of lojas.entries()){
+    if(!l.horarios){ l.horario=''; continue; }
+    const nomeLoja=(SITE_CFG.lojas[i]||{}).nome||'loja';
+    const errado=SITE_DIAS.find(([dia])=>{ const f=l.horarios[String(dia)]; return f && !(f[0] && f[1] && f[0]<f[1]); });
+    if(errado){ toast(nomeLoja+', '+errado[1]+': a hora de abrir precisa ser antes da de fechar.',true); return; }
+    if(!SITE_DIAS.some(([dia])=>l.horarios[String(dia)])){ toast(nomeLoja+': marque ao menos um dia aberto, ou desmarque "Informar horário".',true); return; }
+    // O texto que o cliente lê sai do horário por dia: os dois nunca discordam.
+    l.horario=siteHorarioResumo(l.horarios);
+  }
+  const semZap=lojas.filter(l=>l.ativo && !String(l.whatsapp).replace(/\D/g,''));
+  if(semZap.length && !await uiConfirm('Loja ligada sem WhatsApp cadastrado: o cliente não vai ter o botão "Falar com a loja" na página do pedido.\n\nSalvar mesmo assim?',{ okText:'Salvar assim' })) return;
+  const categorias=[...document.querySelectorAll('#spcBody input[id^="spcCat_"]')].filter(c=>c.checked).map(c=>c.value);
+  const { error } = await sb.rpc('erp_site_config_salvar',{ p:{ lojas, categorias_ocultas:categorias, nome_exibicao:($('#spcNome')||{}).value||'' } });
+  if(error){ toast('Erro: '+error.message,true); return; }
+  toast('Pedido pelo site salvo');
+  try{ await loadCompany(); }catch(_){}
+  renderSiteConfigCard();
+};
+
+window.siteCopiar = async (id)=>{
+  const el=document.getElementById(id); if(!el) return;
+  try{ await navigator.clipboard.writeText(el.value); }
+  catch(_){ el.select(); try{ document.execCommand('copy'); }catch(__){} }
+  toast('Copiado');
+};
 
 // ======================= GO =======================
 function splitDeclarativeArgs(source){

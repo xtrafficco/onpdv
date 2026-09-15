@@ -672,3 +672,29 @@ body.pdv-mode .ov .modal .btn.ghost:hover{background:rgba(255,255,255,.14);filte
 #login .box.mfa-step > .login-help,
 #login .box.mfa-step > .login-links,
 #login .box.mfa-step > #liMsg{display:none}
+
+/* ===== Pedidos do site (link no WhatsApp) =====
+   A mesma lista aparece no card de Entregas (fundo claro) e no modal do caixa (fundo
+   azul do PDV), por isso a borda e o fundo mudam pelo contexto e não pela classe. */
+.sp-ped{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#fff;line-height:1.45}
+.pdv-mod .sp-ped{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.2)}
+.sp-ped.pendente{box-shadow:inset 4px 0 0 var(--accent)}
+.sp-ped-topo{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px}
+.sp-ped-topo b{font-size:16px}
+.sp-ped-itens{margin:8px 0;padding-left:18px}
+.sp-ped-itens li{margin:2px 0}
+.sp-ped-acoes{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.sp-mut{opacity:.75;font-size:13px}
+.spc-cats{display:flex;flex-wrap:wrap;gap:8px 18px;margin:8px 0 14px}
+.spc-cats .chk{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:14px}
+.spc-cats .chk input{width:18px;height:18px}
+.spc-hor{border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:8px 0;background:#fff}
+.spc-hor summary{cursor:pointer;min-height:32px;display:list-item;line-height:32px}
+.spc-hor .chk{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:14px;margin:8px 0}
+.spc-hor .chk input{width:18px;height:18px}
+.spc-dias{display:grid;gap:6px;margin:4px 0 6px}
+.spc-dia{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.spc-dia .chk{min-width:72px;margin:0}
+.spc-dia input[type=time]{max-width:120px}
+.spc-link{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.spc-link-topo{margin-bottom:6px}

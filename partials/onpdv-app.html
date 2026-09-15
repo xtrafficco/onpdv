@@ -331,6 +331,12 @@
     <!-- ---- ENTREGAS (fila) ---- -->
     <div id="page-entregas" class="page">
       <div class="stats" id="delivStats"></div>
+      <div class="card pad u-static-15" id="cardSitePedidos">
+        <div class="head"><h2>🛒 Pedidos do site</h2><span class="grow"></span>
+          <span class="chip" id="sitePedChip">—</span>
+          <button class="btn ghost sm" data-onclick="sitePedAtualizar()">Atualizar</button></div>
+        <div id="sitePedCard"><p class="muted">Carregando…</p></div>
+      </div>
       <div class="card pad u-static-15">
         <div class="head u-static-8"><h2>🗺️ Rastreio em tempo real</h2><span class="grow"></span>
           <span class="chip ok" id="trkLive" title="Atualiza sozinho">⚡ ao vivo</span>
@@ -999,7 +1005,7 @@
       </div>
       <div class="card pad u-static-15" id="cardPdvInstaller">
         <div class="head"><h2>🛒 Instalador da Frente de Caixa</h2><span class="grow"></span>
-          <span class="chip ok" id="pdvInstallerVersion">2026.09.14 · v57</span>
+          <span class="chip ok" id="pdvInstallerVersion">2026.09.15 · v58</span>
           <a class="btn" href="downloads/onpdv-caixa.bat" download="onpdv-caixa.bat">⬇ Baixar ONPDV Caixa</a></div>
         <p class="muted u-static-56">
           Baixe este instalador em cada computador de venda. Ele instala o componente
@@ -1029,6 +1035,12 @@
           <span id="cpxStatus" class="chip">—</span></div>
         <p class="muted">Quando <b>ligada</b>, o lembrete de crediário vencido enviado por WhatsApp passa a incluir um <b>PIX copia-e-cola</b> da parcela; o cliente paga e a parcela é baixada sozinha. Vem <b>desligada</b> — ligue só depois de conferir o texto da mensagem e testar com uma parcela real. Exige o provedor de WhatsApp configurado no servidor.</p>
         <div id="cpxBody" class="pdv-btns" style="margin-top:6px"></div>
+      </div>
+      <div class="card pad u-static-15" id="cardPedidoSite">
+        <div class="head"><h2>🛒 Pedido pelo site (link no WhatsApp)</h2><span class="grow"></span>
+          <span id="spcStatus" class="chip">—</span></div>
+        <p class="muted">O cliente escreve para a loja, a <b>mensagem de saudação do WhatsApp Business</b> responde com o link, e o pedido é feito numa página do ONPDV. Ele cai em <b>Entregas → Pedidos do site</b> e no botão <b>Pedidos do site</b> do caixa, com aviso sonoro. Nada é baixado do estoque nem cobrado antes de alguém da loja aceitar. Não usa API do WhatsApp: não tem custo por mensagem.</p>
+        <div id="spcBody"><p class="muted">Carregando…</p></div>
       </div>
       <div class="card pad u-static-15">
         <div class="head"><h2>💳 Maquininhas (Mercado Pago Point)</h2><span class="grow"></span>
