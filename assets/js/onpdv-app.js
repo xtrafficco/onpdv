@@ -1147,11 +1147,35 @@ async function posQueueAttempt(){
   posBindRequest(reqId);
   posArmAttemptTimer();
   sb.functions.invoke('pos-cloud-charge',{ body:{ request_id:reqId } })
-    .then(({data,error})=>{ if(window._posSettled) return;
-      if(error){ console.warn('pos-cloud-charge',error); posQueueAdvanceOrFail('Não consegui acionar a maquininha.'); return; }
+    .then(async ({data,error})=>{ if(window._posSettled) return;
+      if(error){ console.warn('pos-cloud-charge',error);
+        posQueueAdvanceOrFail(await posMotivoDoServidor(error) || 'Não consegui acionar a maquininha.'); return; }
       if(data && data.status==='processando'){ posQueueAdvanceOrFail('A maquininha não respondeu.'); }
     })
-    .catch(e=>{ console.warn('pos-cloud-charge',e); if(!window._posSettled) posQueueAdvanceOrFail('Não consegui acionar a maquininha.'); });
+    .catch(async e=>{ console.warn('pos-cloud-charge',e);
+      if(!window._posSettled) posQueueAdvanceOrFail(await posMotivoDoServidor(e) || 'Não consegui acionar a maquininha.'); });
+}
+
+// A edge function diz POR QUE a cobrança não foi: Device ID fora do padrão, ordem
+// presa no visor do aparelho, token da loja ausente. Mas o supabase-js embrulha a
+// resposta HTTP num FunctionsHttpError cujo corpo só sai lendo `error.context` —
+// e esse corpo era descartado aqui. O operador via sempre "Não consegui acionar a
+// maquininha" e não tinha o que fazer com isso; o motivo real só aparecia nos logs
+// do servidor. (18/09/2026: um caixa ficou a tarde toda travado por uma ordem presa
+// na Point, sem que a tela dissesse isso em momento algum.)
+async function posMotivoDoServidor(erro){
+  try{
+    const ctx = erro && erro.context;
+    if(ctx && typeof ctx.json === 'function'){
+      const corpo = await ctx.clone().json();
+      if(corpo && corpo.error) return String(corpo.error);
+    }
+    if(ctx && typeof ctx.text === 'function'){
+      const txt = await ctx.clone().text();
+      if(txt){ try{ const j=JSON.parse(txt); if(j&&j.error) return String(j.error); }catch(_){} }
+    }
+  }catch(_){ /* sem corpo legível: cai na mensagem genérica */ }
+  return '';
 }
 // Aborta a cobrança atual no aparelho SEM cancelar a venda (keep_sale) — finaliza
 // se já tiver sido paga. Devolve 'aprovado' | 'cancelado'.

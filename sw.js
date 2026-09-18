@@ -49,14 +49,32 @@ const SHELL = [
   SUPABASE_LIB
 ];
 
+// Sem estes cinco o caixa não abre: são a casca mínima do PDV. Todo o resto do SHELL
+// (os outros portais, Leaflet, ícones, a lib da CDN) é acessório e pode faltar.
+const NUCLEO = [
+  './index.html',
+  './assets/css/onpdv.css',
+  './assets/js/onpdv-bootstrap.js',
+  './assets/js/onpdv-app.js',
+  './partials/onpdv-app.html',
+];
+
 self.addEventListener('install', (e) => {
-  // Pré-cache TOLERANTE: se um item falhar (ex.: a lib do Supabase via CDN indisponível na
-  // primeira instalação), o SW ainda instala e cacheia todo o resto — o que falhar é
-  // buscado depois pelo handler de fetch. Evita que o app fique sem casca offline por um
-  // único recurso externo. (addAll é tudo-ou-nada; allSettled sobre add() não é.)
+  // O NÚCLEO é tudo-ou-nada; o resto é tolerante.
+  //
+  // Antes o pré-cache inteiro era tolerante, o que parecia prudente e não era: se o
+  // onpdv.css falhasse aqui, o SW instalava do mesmo jeito e ficava sem rede de
+  // segurança justamente no arquivo sem o qual a tela abre sem estilo nenhum. E o
+  // caixa não tem como perceber — só aparece no dia em que a rede oscila.
+  //
+  // Falhar a instalação é melhor: o SW anterior continua no comando e o app segue
+  // funcionando online, em vez de ficar com um cache furado que só se revela offline.
   e.waitUntil(
     caches.open(CACHE)
-      .then((c) => Promise.allSettled(SHELL.map((u) => c.add(u))))
+      .then((c) => c.addAll(NUCLEO).then(() => {
+        const resto = SHELL.filter((u) => !NUCLEO.includes(u));
+        return Promise.allSettled(resto.map((u) => c.add(u)));
+      }))
       .then(() => self.skipWaiting())
   );
 });
@@ -67,6 +85,31 @@ self.addEventListener('activate', (e) => {
       .then(() => self.clients.claim())
   );
 });
+
+// respondWith() com algo que não seja Response estoura um TypeError e o navegador
+// registra "Failed to convert value to 'Response'" — erro que não diz nada sobre a
+// causa real. Os três caminhos abaixo terminavam em `caches.match()`, que resolve
+// `undefined` quando o item não está no cache; era o que acontecia quando a rede
+// falhava num arquivo que o pré-cache não guardou.
+//
+// Aqui a falha volta a ser o que seria sem Service Worker nenhum: um erro de rede
+// honesto, que aparece no console com o nome do arquivo que faltou.
+const falhaDeRede = () => Response.error();
+
+// Navegação é o único caso em que dá para fazer melhor que um erro cru: quem abriu o
+// sistema merece uma frase explicando, não a tela de dinossauro do navegador.
+const paginaSemConexao = () => new Response(
+  '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">'
+  + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+  + '<title>ONPDV — sem conexão</title></head>'
+  + '<body style="font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1.5rem;color:#1c2333">'
+  + '<h1 style="font-size:1.25rem">Sem conexão</h1>'
+  + '<p>O ONPDV não conseguiu carregar esta tela e não há uma cópia guardada para abrir offline.</p>'
+  + '<p>Verifique a internet e tente de novo.</p>'
+  + '<p><button onclick="location.reload()" style="font:inherit;padding:.6rem 1.2rem;border:0;border-radius:.5rem;background:#12307a;color:#fff;cursor:pointer">Tentar de novo</button></p>'
+  + '</body></html>',
+  { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } },
+);
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
@@ -97,7 +140,9 @@ self.addEventListener('fetch', (e) => {
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
         }
         return res;
-      }).catch(() => caches.match(req).then((c) => c || caches.match(fallback)))
+      }).catch(() => caches.match(req)
+        .then((c) => c || caches.match(fallback))
+        .then((c) => c || paginaSemConexao()))
     );
     return;
   }
@@ -118,7 +163,7 @@ self.addEventListener('fetch', (e) => {
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
         }
         return res;
-      }).catch(() => caches.match(req))
+      }).catch(() => caches.match(req).then((c) => c || falhaDeRede()))
     );
     return;
   }
@@ -133,7 +178,7 @@ self.addEventListener('fetch', (e) => {
           caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
         }
         return res;
-      }).catch(() => cached);
+      }).catch(() => cached || falhaDeRede());
       return cached || network;
     })
   );
