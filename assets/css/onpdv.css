@@ -147,8 +147,19 @@ tr:hover td{background:#f7f9ff}
 tr.clickrow{cursor:pointer}
 tr.clickrow:hover{background:#f2f6ff}
 @media print{
-  body>*{display:none!important}
-  #receiptPrint{display:block!important;font-family:'Courier New',monospace;color:#000;width:var(--rc-w,72mm);font-size:12px;line-height:1.35}
+  /* Mostra só o recibo e esconde o resto.
+     Era `body>*{display:none}` + `#receiptPrint{display:block}`, e NAO funcionava:
+     o #receiptPrint mora dentro de <main id="appHost">, que e quem recebe o partial
+     do app. `display:none` no pai vence qualquer `display:block` do filho, entao a
+     folha saia em branco em tudo que imprime por window.print() — aba Pedidos,
+     Crediario, Transferencias, pedido de compra e recibo de recebimento. (O cupom do
+     caixa escapava porque vai pelo caminho RAW/ESC-POS, nao por aqui.)
+     `visibility` e o oposto: e herdada, mas o filho pode voltar a aparecer mesmo com
+     o pai oculto — que e exatamente o que precisamos, sem depender de onde o
+     #receiptPrint esteja na arvore. */
+  body{visibility:hidden;background:#fff}
+  #receiptPrint,#receiptPrint *{visibility:visible}
+  #receiptPrint{position:absolute;left:0;top:0;display:block!important;font-family:'Courier New',monospace;color:#000;width:var(--rc-w,72mm);font-size:12px;line-height:1.35}
   #receiptPrint h3{font-size:14px;text-align:center;margin:0}
   #receiptPrint .ln{border-top:1px dashed #000;margin:5px 0}
   #receiptPrint .row{display:flex;justify-content:space-between;gap:6px}

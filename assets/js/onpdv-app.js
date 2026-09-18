@@ -3763,18 +3763,25 @@ function pdvReceiptPlain(sale){
   L.push(pdvTextPair('TOTAL R$',pdvMoneyNum(r.total),width));
   if(r.change>0) L.push(pdvTextPair('Troco R$',pdvMoneyNum(r.change),width));
   L.push(sep);
+  var temCrediario=(sale.pays||[]).some(function(x){return x.m==='crediario';});
   var formas=Array.from(new Set((sale.pays||[]).map(function(x){return pdvPayMethodLabel(x.m);}))).join(' + ')||'-';
   pdvWrapText('FORMA DE PAGAMENTO: '+formas,width).forEach(function(ln){ L.push(ln); });
   (sale.pays||[]).forEach(function(x){
     var det=[x.bandeira?('Bandeira '+x.bandeira):'',x.nsu?('NSU '+x.nsu):'',x.auth?('Aut '+x.auth):''].filter(Boolean).join(' ');
     if(det) L.push(('  '+det).slice(0,width));
   });
-  L.push(sep);
-  L.push('PARCELAS');
-  L.push(sep);
-  pdvReceiptParcelas(sale).forEach(function(p){
-    L.push(pdvTextPair(String(p.n).padStart(2,'0')+'  '+p.date+'  '+pdvMoneyNum(p.value),p.status,width));
-  });
+  // PARCELAS so quando ha crediario. Numa venda a vista o bloco so repetia o que ja
+  // estava logo acima ("01  18/09/26  1,00  pago") e ocupava quatro linhas de bobina
+  // sem dizer nada novo. No crediario ele fica: e onde o cliente ve os vencimentos,
+  // e a via dele e esta — o canhoto assinado fica com a loja.
+  if(temCrediario){
+    L.push(sep);
+    L.push('PARCELAS');
+    L.push(sep);
+    pdvReceiptParcelas(sale).forEach(function(p){
+      L.push(pdvTextPair(String(p.n).padStart(2,'0')+'  '+p.date+'  '+pdvMoneyNum(p.value),p.status,width));
+    });
+  }
   if(r.cashback_earned>0){ L.push(sep);
     L.push(pdvTextCenter('Cashback ganho '+pdvMoneyNum(r.cashback_earned),width));
     L.push(pdvTextCenter('Saldo '+pdvMoneyNum(r.cashback_balance),width)); }
@@ -3784,7 +3791,7 @@ function pdvReceiptPlain(sale){
   L.push('');
   L.push(pdvTextCenter('Obrigado pela preferencia!',width));
   // Canhoto: so quando ha crediario (o cliente assina reconhecendo as parcelas)
-  if((sale.pays||[]).some(function(x){return x.m==='crediario';})){
+  if(temCrediario){
     L.push('');
     L.push(pdvTextCenter(('- '.repeat(Math.ceil(width/2))).trim(),width));
     L.push('');
