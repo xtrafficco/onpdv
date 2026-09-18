@@ -1056,7 +1056,7 @@ window.pdvOfflineCacheState = function(){
 // ============ CHECAGEM DE NOVA VERSÃO (caixa instalado) ============
 // O caixa roda dos arquivos locais; para saber se saiu versão nova, consulta o version.json
 // do site publicado e avisa (com link para baixar o instalador). Não aplica sozinho.
-const ONPDV_VERSION='2026.09.16-v59';
+const ONPDV_VERSION='2026.09.18-v60';
 const ONPDV_SITE='https://onpdv.vercel.app';
 // O badge do card "Instalador da Frente de Caixa" mostra a mesma versão. Preenchemos
 // por aqui para não existir um segundo lugar no código que alguém precise lembrar de
@@ -3590,8 +3590,12 @@ async function onpdvPrintText(text,label,options={}){
   const clean=pdvAscii(String(text||'')).replace(/[ \t]+$/gm,'').trim();
   if(!clean){toast('Documento de impressão vazio.',true);return false;}
   if(!onpdvLocalPrint()){
+    // Sem a bridge local (ERP no navegador), o fechamento de caixa, a Leitura X e os
+    // comprovantes caem aqui. Usam o mesmo padrao dos demais: monoespacada preta e em
+    // negrito, no tamanho que preserva as colunas do documento.
     const html=options.html||('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>'+esc(label||'ONPDV')
-      +'</title><style>body{font:13px/1.45 monospace;white-space:pre-wrap;color:#000}</style></head><body>'+esc(clean)+'</body></html>');
+      +'</title><style>'+onpdvCssTermicoBase()
+      +'body{font-size:12px;line-height:1.3;white-space:pre}</style></head><body>'+esc(clean)+'</body></html>');
     return onpdvPrintDocument(html,label);
   }
   if(ONPDV_PRINT.busy){toast('Aguarde a impressão atual terminar.');return false;}
@@ -3615,6 +3619,67 @@ async function onpdvPrintText(text,label,options={}){
     ONPDV_PRINT.busy=false;
   }
 }
+// Estilo unico de tudo que sai em papel: recibos do ERP, cupom do caixa e
+// fechamento de caixa / Leitura X.
+//
+// POR QUE NEGRITO. A termica queima pontos no papel; letra fina vira cinza claro e o
+// cliente nao le. Peso 700 dobra a quantidade de ponto queimado e e o que deixa o
+// texto preto de verdade. Medido antes de aplicar: em fonte MONOESPACADA o peso NAO
+// altera a largura do caractere (42 colunas de 80mm dao os mesmos 230,92px em 400 ou
+// 700), entao da para engrossar sem quebrar as linhas de separacao do cupom — que e
+// justamente por isso que o tamanho nao pode subir junto.
+//
+// print-color-adjust:exact impede o navegador de "economizar tinta" clareando o
+// preto, que e outra fonte de cupom lavado.
+var ONPDV_FONTE_TERMICA='"Consolas","Courier New",monospace';
+function onpdvCssTermicoBase(){
+  return 'html,body{-webkit-print-color-adjust:exact;print-color-adjust:exact}'
+    +'body{margin:0;color:#000;font-family:'+ONPDV_FONTE_TERMICA+';font-weight:700;'
+    +'-webkit-font-smoothing:none;text-rendering:geometricPrecision}'
+    +'b,strong,h1,h2,h3,.b{font-weight:700}';
+}
+
+// Imprime o bloco montado em #receiptPrint (pedido, recebimento, entrega, pedido de
+// compra, transferencia) num documento proprio, em vez de mandar window.print() na
+// pagina inteira.
+//
+// Por que: o caminho antigo dependia do @media print esconder todo o resto da tela e
+// deixar so o #receiptPrint aparecendo. So que o #receiptPrint mora dentro de
+// <main id="appHost"> — e a regra escondia o ancestral, entao o recibo ia junto e a
+// folha saia EM BRANCO (18/09/2026). Mesmo com a regra corrigida, esse desenho e
+// fragil: qualquer mudanca no layout da tela pode derrubar a impressao de novo, e o
+// erro so aparece na hora que alguem tenta imprimir.
+//
+// Aqui o documento impresso contem SO o recibo, com o estilo embutido. Nao ha o que
+// esconder, e a tela por baixo deixa de importar.
+function onpdvImprimirRecibo(corpoHtml, titulo){
+  if(!String(corpoHtml||'').trim()){ toast('Nada para imprimir.',true); return false; }
+  var largura='72mm';
+  try{ largura=paperDims().content||largura; }catch(_){}
+  // Aqui o layout e HTML livre (div/table), nao colunas fixas: da para subir de 12
+  // para 13px sem risco, o que ajuda na leitura junto com o negrito.
+  var css='@page{margin:4mm}'+onpdvCssTermicoBase()
+    +'body{font-size:13px;line-height:1.35}'
+    +'#rc{width:'+largura+'}'
+    +'#rc h3{font-size:15px;text-align:center;margin:0}'
+    +'#rc .ln{border-top:1px dashed #000;margin:5px 0}'
+    +'#rc .row{display:flex;justify-content:space-between;gap:6px}'
+    +'#rc .c{text-align:center}'
+    +'#rc .b{font-weight:bold}'
+    +'#rc table{width:100%;font-size:11px;border-collapse:collapse}'
+    +'#rc td{padding:1px 0;vertical-align:top}';
+  var html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>'
+    +esc(titulo||'ONPDV')+'</title><style>'+css+'</style></head><body><div id="rc">'
+    +corpoHtml+'</div></body></html>';
+  return onpdvPrintDocument(html, titulo||'recibo');
+}
+
+// Pega o que a tela acabou de montar em #receiptPrint e manda para a impressao.
+function onpdvImprimirReciboDoDom(titulo){
+  var el=document.getElementById('receiptPrint');
+  return onpdvImprimirRecibo(el?el.innerHTML:'', titulo);
+}
+
 function onpdvPrintDocument(html,label){
   if(ONPDV_PRINT.busy){ toast('Aguarde a impressão atual terminar.'); return false; }
   ONPDV_PRINT.busy=true;
@@ -3825,10 +3890,11 @@ async function pdvPrintReceipt(sale=PDV.lastSale){
   // bobina sem quebrar as linhas de separacao. A impressao termica real usa o caminho
   // RAW (ESC/POS, fonte nativa da impressora) e nao depende desta medida.
   const preFont=pdvPaper()==='58'?'8.5px':'10px';
-  const css='@page{size:'+P.page+' auto;margin:'+P.margin+'}'
-    +'body{margin:0;color:#000;font-family:"Consolas","Courier New",monospace}'
+  const css='@page{size:'+P.page+' auto;margin:'+P.margin+'}'+onpdvCssTermicoBase()
     +'.rc{width:'+P.content+'}'
-    +'.rc-pre{font-family:"Consolas","Courier New",monospace;font-size:'+preFont+';line-height:1.3;white-space:pre;margin:0}';
+    // O tamanho continua o calibrado para as colunas; o que muda e o peso, que nao
+    // mexe na largura (medido) e e o que tira o cupom do cinza.
+    +'.rc-pre{font-family:'+ONPDV_FONTE_TERMICA+';font-weight:700;font-size:'+preFont+';line-height:1.3;white-space:pre;margin:0}';
   const html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Venda #'
     +sale.res.num+'</title><style>'+css+'</style></head><body>'+pdvReceiptHtml(sale)+'</body></html>';
   const isCred=(sale.pays||[]).some(function(x){return x.m==='crediario';});
@@ -5244,7 +5310,7 @@ window.recvPrint = ()=>{
     <table>${(d.itens||[]).map(i=>`<tr><td class="row"><span>${(+i.qtd).toLocaleString('pt-BR')}x ${esc(i.descricao)}</span><span>${BRL(i.subtotal)}</span></td></tr>`).join('')}</table>
     <div class="ln"></div>
     <div class="c" style="font-size:10px">${new Date().toLocaleString('pt-BR')} · ONPDV</div>`;
-  window.print();
+  onpdvImprimirReciboDoDom('Recebimento');
 };
 
 // ======================= DASHBOARD =======================
@@ -6525,7 +6591,7 @@ window.printReceipt = async (saleId)=>{
     <div class="c" style="margin-top:6px;font-size:10px">ONPDV</div>`;
   // ajusta a largura do recibo à bobina escolhida nesta máquina (80 ou 58 mm)
   try{ document.documentElement.style.setProperty('--rc-w', paperDims().content); }catch(e){}
-  window.print();
+  onpdvImprimirReciboDoDom('Pedido');
 };
 
 // ======================= PEDIDOS =======================
@@ -8083,7 +8149,7 @@ window.delivPrint=()=>{
     ${q.minutos_entrega!=null?`<div class="row"><span>Tempo</span><span>${dur(q.minutos_entrega)}</span></div>`:''}
     <div class="ln"></div>
     <div class="c" style="font-size:10px">${new Date().toLocaleString('pt-BR')} · ONPDV</div>`;
-  window.print();
+  onpdvImprimirReciboDoDom('Entrega');
 };
 
 // ======================= APP DO ENTREGADOR =======================
@@ -8437,7 +8503,7 @@ window.smartPrint=fi=>{
   $('#receiptPrint').innerHTML = '<h3>PEDIDO DE COMPRA</h3><div class="c">'+esc(fornecedor)+'</div><div class="ln"></div>'+
     lines.map(l=>'<div class="row"><span>'+esc(l.nome)+'</span><b>'+l.qtd+' '+esc(l.un||'')+'</b></div>').join('')+
     '<div class="ln"></div><div class="c" style="font-size:10px">'+new Date().toLocaleString('pt-BR')+'</div>';
-  window.print();
+  onpdvImprimirReciboDoDom('Pedido de compra');
 };
 window.smartQuotes=async fi=>{
   const f=SMART&&SMART.fornecedores&&SMART.fornecedores[fi];
@@ -8578,7 +8644,7 @@ window.poPrint=()=>{
       '<div class="row" style="font-size:10px"><span>'+BRL(i.custo_unit)+' un.</span><span>'+BRL((+i.qtd_pedida||0)*(+i.custo_unit||0))+'</span></div>').join('')+
     '<div class="ln"></div><div class="row b"><span>TOTAL</span><span>'+BRL(d.total_previsto)+'</span></div>'+
     '<div class="ln"></div><div class="c" style="font-size:10px">'+new Date().toLocaleString('pt-BR')+'</div>';
-  window.print();
+  onpdvImprimirReciboDoDom('Pedido de compra');
 };
 window.poReceive=async id=>{
   const { data:d } = await sb.rpc('erp_po_detail',{ p_po:id });
@@ -9244,7 +9310,7 @@ window.trPrint = ()=>{
     <div class="ln"></div>
     <div class="row" style="font-size:10px"><span>Conferido por</span><span>____________________</span></div>
     <div class="c" style="font-size:10px;margin-top:6px">${new Date().toLocaleString('pt-BR')} · ONPDV</div>`;
-  window.print();
+  onpdvImprimirReciboDoDom('Transferencia');
 };
 window.trConfirm = async (id, num)=>{
   if(!await uiConfirm('Confirmar a transferência #'+num+'? O estoque será movido da Modelo para a loja e será gerada a fatura de custo.',{okText:'Confirmar transferência'})) return;

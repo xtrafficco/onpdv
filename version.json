@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.16-v59",
+  "version": "2026.09.18-v60",
   "installer": "/downloads/onpdv-caixa.bat",
-  "notes": "Pedido pelo site com PIX pago na hora: quem escolhe PIX recebe o código copia e cola, e o pedido só chega ao caixa depois de pago, com o selo PAGO; aceitar cria a entrega já paga (o motoboy não cobra). Impressão: a fonte dos comprovantes, da Leitura X e do fechamento de caixa volta ao tamanho normal (não sai mais esticada). Reinstale o caixa para a impressão nova valer."
+  "notes": "Impressao dos recibos refeita: o pedido, a entrega, a transferencia, o pedido de compra e o recibo de recebimento passam a sair num documento proprio — antes a folha saia em branco. A fonte de tudo que vai para a bobina ficou em negrito e preto chapado, para o cupom nao sair lavado. O recibo agora diz se foi CARTAO DEBITO, CARTAO CREDITO ou PIX, e o fechamento de caixa separa credito de debito em linhas proprias. As parcelas sairam do cupom a vista (continuam no crediario). Reinstale o caixa para tudo isso valer."
 }
