@@ -1056,7 +1056,7 @@ window.pdvOfflineCacheState = function(){
 // ============ CHECAGEM DE NOVA VERSÃO (caixa instalado) ============
 // O caixa roda dos arquivos locais; para saber se saiu versão nova, consulta o version.json
 // do site publicado e avisa (com link para baixar o instalador). Não aplica sozinho.
-const ONPDV_VERSION='2026.09.18-v60';
+const ONPDV_VERSION='2026.09.24-v61';
 const ONPDV_SITE='https://onpdv.vercel.app';
 // O badge do card "Instalador da Frente de Caixa" mostra a mesma versão. Preenchemos
 // por aqui para não existir um segundo lugar no código que alguém precise lembrar de
@@ -6540,23 +6540,23 @@ window.voidSale = async (saleId, forma, numero)=>{
     if(currentPage==='home') loadHome();
   }
   const { data:nf } = await sb.from('fiscal_documents').select('ref,modelo').eq('sale_id',saleId).eq('status','autorizado').maybeSingle();
-  if(nf && await uiConfirm('Esta venda tem uma '+(nf.modelo==='55'?'NF-e':'NFC-e')+' autorizada. Deseja cancelá-la na SEFAZ também?',{okText:'Sim, cancelar na SEFAZ',cancelText:'Não'})){
+  if(nf && await uiConfirm('Esta venda tem uma '+(nf.modelo==='55'?'NF-e':'NFC-e')+' autorizada. Deseja registrar a pendência de cancelamento no Mercado Pago?',{okText:'Registrar pendência',cancelText:'Não'})){
     cancelNfe(nf.ref);
   }
 };
 window.cancelNfe = async (ref)=>{
-  const just = await uiPrompt('Justificativa do cancelamento (mínimo 15 caracteres):','Cancelamento a pedido do emitente',{okText:'Cancelar na SEFAZ'});
+  const just = await uiPrompt('Justificativa do cancelamento (mínimo 15 caracteres):','Cancelamento a pedido do emitente',{okText:'Registrar no ONPDV'});
   if(just===null) return;
   if(just.trim().length<15){ toast('Justificativa muito curta (mín. 15 caracteres).',true); return; }
-  toast('Cancelando na SEFAZ…');
+  toast('Registrando pendência fiscal no Mercado Pago…');
   try{
     const { data:{ session } } = await sb.auth.getSession();
     const r = await fetch(`${SUPABASE_URL}/functions/v1/fiscal-cancel`,{ method:'POST',
       headers:{ 'Authorization':`Bearer ${session.access_token}`, 'Content-Type':'application/json' },
       body: JSON.stringify({ ref, justificativa: just.trim() }) });
     const j = await r.json();
-    if(j.error || !j.ok) throw new Error(j.error || 'A SEFAZ não confirmou o cancelamento');
-    toast('NF-e cancelada'); loadOrders();
+    if(j.error || !j.ok) throw new Error(j.error || 'Não consegui registrar a pendência fiscal');
+    toast('Confira o cancelamento fiscal no Mercado Pago'); loadOrders();
   }catch(e){ toast('Erro: '+(e.message||e),true); }
 };
 
@@ -6702,8 +6702,8 @@ window.convertOrc = async (id, num)=>{
 // ======================= NOTA FISCAL =======================
 window.emitNota = async (saleId, modelo)=>{
   const nomeMod = modelo==='55'?'NF-e':'NFC-e';
-  modal(`<div class="m-head"><h3>Emitir ${nomeMod}</h3><button data-modal-close>×</button></div>
-    <div class="m-body qrbox" id="nfBody"><p class="muted" style="padding:24px">Enviando para a SEFAZ…</p></div>
+  modal(`<div class="m-head"><h3>${nomeMod} · Mercado Pago</h3><button data-modal-close>×</button></div>
+    <div class="m-body qrbox" id="nfBody"><p class="muted" style="padding:24px">Registrando pendência fiscal para conferência no Mercado Pago…</p></div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Fechar</button></div>`);
   try{
     const { data:{ session } } = await sb.auth.getSession();
@@ -6714,10 +6714,9 @@ window.emitNota = async (saleId, modelo)=>{
     const j = await r.json();
     if(j.error) throw new Error(j.error);
     nfStatus(saleId, modelo);
-    nfPoll(saleId, modelo);
   }catch(e){
     $('#nfBody').innerHTML = `<p class="neg" style="padding:16px">${esc(e.message||e)}</p>
-      <p class="muted" style="font-size:13px">Configure os secrets <b>FOCUS_NFE_TOKEN</b> e <b>FOCUS_NFE_ENV</b>, cadastre a loja com CNPJ/IE e os campos fiscais (NCM/CFOP) dos produtos.</p>`;
+      <p class="muted" style="font-size:13px">A emissão da NFC-e deve ser feita no Mercado Pago. Confira se a venda foi recebida pela conta/Point correta e se o módulo fiscal está habilitado no Sistema de Gestão do Mercado Pago.</p>`;
   }
 };
 let nfTimer=null;
@@ -6733,8 +6732,13 @@ async function nfStatus(saleId, modelo){
   } else if(data.status==='rejeitado'||data.status==='erro'){
     b.innerHTML = `<div style="font-size:40px">⚠️</div><p class="neg">${esc(data.status)}</p><p class="muted" style="font-size:13px">${esc(data.mensagem||'')}</p>`;
     clearInterval(nfTimer);
+  } else if(data.status==='pendente_mp'){
+    b.innerHTML = `<div style="font-size:40px">🧾</div><p class="b" style="font-family:Fredoka;font-size:20px">Pendente no Mercado Pago</p>
+      <p class="muted" style="font-size:13px">${esc(data.mensagem||'Confira e emita a NFC-e no Mercado Pago.')}</p>
+      <p class="muted" style="font-size:12px;word-break:break-all">Referência ONPDV: ${esc(data.ref||'')}</p>`;
+    clearInterval(nfTimer); loadOrders();
   } else {
-    b.innerHTML = `<div style="font-size:40px">⏳</div><p class="muted">Processando na SEFAZ…</p>`;
+    b.innerHTML = `<div style="font-size:40px">⏳</div><p class="muted">Aguardando conferência fiscal no Mercado Pago…</p>`;
   }
 }
 function nfPoll(saleId, modelo){ clearInterval(nfTimer); nfTimer=setInterval(()=>nfStatus(saleId,modelo), 3500); }

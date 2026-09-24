@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.18-v60",
+  "version": "2026.09.24-v61",
   "installer": "/downloads/onpdv-caixa.bat",
-  "notes": "Impressao dos recibos refeita: o pedido, a entrega, a transferencia, o pedido de compra e o recibo de recebimento passam a sair num documento proprio — antes a folha saia em branco. A fonte de tudo que vai para a bobina ficou em negrito e preto chapado, para o cupom nao sair lavado. O recibo agora diz se foi CARTAO DEBITO, CARTAO CREDITO ou PIX, e o fechamento de caixa separa credito de debito em linhas proprias. As parcelas sairam do cupom a vista (continuam no crediario). Reinstale o caixa para tudo isso valer."
+  "notes": "Reforco de seguranca aplicado no servidor: cada operador so cria e recebe venda na propria loja (admin segue multi-loja), o limite de credito do cliente so muda por administrador, e o recebimento PIX do PagBank so confirma o pagamento apos consultar o banco. Funcoes de rotina deixaram de ficar expostas aos usuarios. Na interface, o texto secundario e as cores de status ganharam mais contraste. As mudancas de servidor ja estao no ar; reinstale o caixa para alinhar a versao e o visual."
 }

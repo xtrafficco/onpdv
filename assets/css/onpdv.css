@@ -1,9 +1,9 @@
 :root{
   /* ON PDV brand mantido; neutros/craft inspirados no design system Linear (light) */
   --dark:#12307a; --dark2:#0e2660; --dark3:#173a8a;
-  --bg:#f7f8fa; --card:#fff; --ink:#1c2333; --ink2:#596579;
+  --bg:#f7f8fa; --card:#fff; --ink:#1c2333; --ink2:#4f5769; /* texto suave: escurecido p/ AA em texto pequeno (~5.4:1 no branco) */
   --line:#e4e7ee; --accent:#ffcf3f; --accent-d:#e9b400;
-  --green:#22a65a; --green-soft:#e3f6ec; --red:#d94b45; --red-soft:#fdeceb;
+  --green:#1a9950; --green-soft:#e3f6ec; --red:#cf3f39; --red-soft:#fdeceb; /* verde/vermelho levemente escurecidos p/ melhor contraste com texto branco */
   --blue:#3b7de0; --amber:#e2a400;
   --focus:#5e6ad2; /* lavanda Linear — usada só em focus ring */
   --r:10px; --r-sm:8px; --shadow:0 1px 2px rgba(16,24,40,.04),0 4px 16px rgba(16,24,40,.06);
