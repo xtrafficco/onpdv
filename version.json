@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.24-v61",
+  "version": "2026.09.25-v62",
   "installer": "/downloads/onpdv-caixa.bat",
-  "notes": "Reforco de seguranca aplicado no servidor: cada operador so cria e recebe venda na propria loja (admin segue multi-loja), o limite de credito do cliente so muda por administrador, e o recebimento PIX do PagBank so confirma o pagamento apos consultar o banco. Funcoes de rotina deixaram de ficar expostas aos usuarios. Na interface, o texto secundario e as cores de status ganharam mais contraste. As mudancas de servidor ja estao no ar; reinstale o caixa para alinhar a versao e o visual."
+  "notes": "Pedido pelo site refeito como app de compras: o cliente informa CEP e numero, o endereco escolhe automaticamente a loja mais perto que entrega, e o catalogo agora mostra os produtos com foto (placeholder por categoria enquanto a foto nao foi cadastrada). Seguranca reforcada no servidor: cada operador so cria e recebe venda na propria loja, o limite de credito do cliente so muda por administrador, e o recebimento PIX do PagBank so confirma apos consultar o banco. Na interface, texto secundario e cores de status com mais contraste. As mudancas de servidor ja estao no ar; reinstale o caixa para alinhar a versao e o visual."
 }

@@ -1,13 +1,12 @@
 /* pedido.js — página pública de pedido (pedido.html).
  *
  * Aberta pelo link que a mensagem de saudação do WhatsApp Business manda para quem
- * escreve para a loja. Fluxo: onde entregar → produtos → carrinho e dados → acompanhar.
+ * escreve para a loja. Fluxo (app de compras): ENDEREÇO (CEP + número, que decide a
+ * loja mais perto) → produtos com foto → carrinho e dados → acompanhar.
  *
  * O que decide preço, distância e se o pedido é aceito é o banco (site_pedido_criar).
  * As contas aqui existem para o cliente ver na tela o mesmo valor que o servidor vai
- * calcular — e as regras seguem as de lá, linha por linha. Se mudar uma, mude a outra;
- * tests/pedido-site.test.mjs trava as duas coisas que mais importam: arredondamento
- * e quantidade de granel.
+ * calcular — e as regras seguem as de lá, linha por linha.
  *
  * As funções de nível superior são puras (sem DOM) de propósito, para os testes
  * carregarem este arquivo num sandbox. Tudo que mexe na tela está em iniciar().
@@ -16,8 +15,6 @@
 
 const PEDIDO_API = (function () {
   const PADRAO = 'https://qkhpvqepgozsaamxmugk.supabase.co/functions/v1/pedido-site';
-  // Só para testar localmente contra um servidor na mesma origem. Em produção o
-  // hostname nunca é localhost, então não há como apontar a página para outro lugar.
   try {
     const u = new URL(location.href);
     if ((u.hostname === 'localhost' || u.hostname === '127.0.0.1') && u.searchParams.get('api')) {
@@ -26,6 +23,10 @@ const PEDIDO_API = (function () {
   } catch (_) { /* sem location: sandbox de teste */ }
   return PADRAO;
 })();
+
+// Base pública do Storage do Supabase (bucket 'produtos'). A CSP de pedido.html libera
+// este host em img-src. imagem_path é o nome do objeto (ex.: "<id>.webp"), sem barras.
+const STORAGE_PUBLICO = 'https://qkhpvqepgozsaamxmugk.supabase.co/storage/v1/object/public/produtos/';
 
 const CHAVE_CARRINHO = 'pedido.carrinho.v1';
 const CHAVE_DADOS = 'pedido.dados.v1';
@@ -108,8 +109,20 @@ function lerDinheiro(v) {
   return Number.isFinite(n) && n > 0 ? arred2(n) : null;
 }
 
+/** Só dígitos do CEP, no máximo 8. */
+function soCep(v) {
+  return String(v || '').replace(/\D/g, '').slice(0, 8);
+}
+
+/** Máscara do CEP enquanto digita: 00000-000. */
+function mascaraCep(v) {
+  const d = soCep(v);
+  return d.length > 5 ? d.slice(0, 5) + '-' + d.slice(5) : d;
+}
+
 /**
  * Primeiro problema do pedido, na mesma ordem e com o mesmo texto que o banco usa.
+ * O endereço é coletado no passo 1; aqui só confirmamos que veio.
  * Devolve { campo, mensagem } ou null.
  */
 function validarPedido(dados, totais, pedidoMinimo) {
@@ -122,7 +135,7 @@ function validarPedido(dados, totais, pedidoMinimo) {
   if (String(d.nome || '').trim().length < 2) return { campo: 'fNome', mensagem: 'Informe seu nome.' };
   if (!foneValido(d.telefone)) return { campo: 'fFone', mensagem: 'Informe o WhatsApp com DDD.' };
   if (String(d.endereco || '').trim().length < 5) {
-    return { campo: 'fEndereco', mensagem: 'Informe o endereço de entrega.' };
+    return { campo: null, mensagem: 'Falta o endereço de entrega. Toque em "Editar" para informar.' };
   }
   if (!['dinheiro', 'cartao', 'pix'].includes(d.pagamento)) {
     return { campo: 'pagDinheiro', mensagem: 'Escolha a forma de pagamento.' };
@@ -148,8 +161,6 @@ const NOME_PAGAMENTO = { dinheiro: 'Dinheiro', cartao: 'Cartão', pix: 'PIX' };
 /** O que mostrar no topo do acompanhamento, a partir do status devolvido pelo banco. */
 function descreverStatus(st) {
   const s = st || {};
-  // selo = nome do ícone em ICONES (SVG): emoji muda de desenho entre aparelhos e vira
-  // quadradinho em Android antigo.
   if (s.status === 'recusado') {
     return { classe: 'erro', selo: 'erro', titulo: 'A loja não pôde aceitar',
       texto: s.motivo ? 'Motivo: ' + s.motivo : 'Fale com a loja pelo WhatsApp para entender.', final: true };
@@ -174,10 +185,8 @@ function descreverStatus(st) {
 /** Linha do tempo do pedido. estado: 'feita', 'atual' ou ''. */
 function etapasDoPedido(st) {
   const s = st || {};
-  // Nomes neutros de propósito: "Loja confirmou" destacado como passo atual era lido
-  // como se a loja já tivesse confirmado.
   const nomes = ['Pedido enviado', 'Confirmação da loja', 'Saída para entrega', 'Entrega'];
-  let feitas = 1;                                   // pendente: só o envio
+  let feitas = 1;
   if (s.status === 'aceito') feitas = s.etapa === 'entregue' ? 4 : s.etapa === 'em_rota' ? 3 : 2;
   if (s.status === 'recusado' || s.status === 'cancelado') return [];
   return nomes.map((nome, i) => ({
@@ -213,8 +222,7 @@ function mascaraFone(v) {
 
 /**
  * Loja do link ?loja=<código>. O código é o começo do id da loja (8 caracteres ou
- * mais, gerado em Configurações). Código que não bate com exatamente uma loja
- * recebendo pedidos → null, e a página mostra a lista.
+ * mais). Código que não bate com exatamente uma loja recebendo pedidos → null.
  */
 function encontrarLojaPorLink(lojas, codigo) {
   const c = String(codigo || '').trim().toLowerCase();
@@ -223,13 +231,16 @@ function encontrarLojaPorLink(lojas, codigo) {
   return achadas.length === 1 ? achadas[0] : null;
 }
 
+/** A loja que vai entregar num endereço: a mais próxima que atende. null se nenhuma. */
+function lojaMaisProxima(lojas) {
+  return (lojas || []).find((l) => l.atende) || null;
+}
+
 function mensagemProdutoNaoEncontrado(busca) {
   return 'Olá! Procurei "' + busca + '" no site de pedidos e não encontrei. Vocês têm?';
 }
 
 // ------------------------------------------------------------------ horário da loja
-// horarios vem do banco: { "0": null, "1": ["08:00","19:00"], … } — 0 = domingo.
-
 const NOME_DIA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 
 function minutosDe(hhmm) {
@@ -237,7 +248,6 @@ function minutosDe(hhmm) {
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
-/** "08:00" → "8h"; "08:30" → "8h30". */
 function fmtHora(hhmm) {
   const m = minutosDe(hhmm);
   if (m == null) return '';
@@ -254,11 +264,6 @@ function faixaDoDia(horarios, dia) {
   return { abre, fecha, textoAbre: fmtHora(f[0]), textoFecha: fmtHora(f[1]) };
 }
 
-/**
- * Aberta ou fechada num momento (dia 0–6 e minutos desde a meia-noite, no fuso da
- * loja). Sem horário cadastrado → null: a página não afirma nada.
- * Devolve { aberta, texto, quando } — quando = "amanhã às 8h", para compor frases.
- */
 function situacaoHorario(horarios, dia, minutos) {
   if (!horarios || typeof horarios !== 'object' || Array.isArray(horarios)) return null;
   const hoje = faixaDoDia(horarios, dia);
@@ -277,14 +282,13 @@ function situacaoHorario(horarios, dia, minutos) {
       return { aberta: false, quando, texto: 'Fechada agora · abre ' + quando };
     }
   }
-  return null;                                      // nenhum dia aberto: nada a afirmar
+  return null;
 }
 
 const FORMATO_AGORA_LOJA = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/Sao_Paulo', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 });
 
-/** Dia da semana e minutos no horário de Brasília — o do celular pode estar em outro fuso. */
 function agoraNaLoja(data) {
   const p = {};
   for (const x of FORMATO_AGORA_LOJA.formatToParts(data || new Date())) p[x.type] = x.value;
@@ -295,7 +299,6 @@ function agoraNaLoja(data) {
 }
 
 // ------------------------------------------------------------------ ícones
-// Traço simples, 24×24, cor do texto. Desenhados aqui para não depender de biblioteca.
 const ICONES = {
   espera: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   ok: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -310,6 +313,41 @@ function icone(nome) {
     + (ICONES[nome] || '') + '</svg>';
 }
 
+// Placeholder de foto por categoria: enquanto o produto não tem foto cadastrada, mostra
+// um desenho simples escolhido pela categoria. Traço 24×24, herda a cor do container.
+const ICONE_CATEGORIA = {
+  racao: '<path d="M4 10h16l-1.5 8a2 2 0 0 1-2 2H7.5a2 2 0 0 1-2-2z"/><path d="M8 10c0-3 1.8-5 4-5s4 2 4 5"/><circle cx="10.5" cy="14.5" r="1"/><circle cx="14" cy="15.5" r="1"/>',
+  petisco: '<path d="M6.5 6.5a2 2 0 1 0-2 2l1 1 6 6 1 1a2 2 0 1 0 2-2l-1-1-6-6z"/><path d="M17.5 6.5a2 2 0 1 1 2 2"/><path d="M17.5 17.5a2 2 0 1 0 2-2"/>',
+  areia: '<path d="M5 4h14v3H5z"/><path d="M6 7l1.5 12a1.5 1.5 0 0 0 1.5 1.3h6a1.5 1.5 0 0 0 1.5-1.3L18 7"/><path d="M9.5 11l1 6M14.5 11l-1 6"/>',
+  brinquedo: '<circle cx="12" cy="12" r="7.5"/><path d="M12 4.5v15M4.5 12h15"/>',
+  higiene: '<path d="M12 3s5 5.5 5 9a5 5 0 0 1-10 0c0-3.5 5-9 5-9z"/>',
+  farmacia: '<rect x="4.5" y="4.5" width="15" height="15" rx="3"/><path d="M12 8.5v7M8.5 12h7"/>',
+  acessorio: '<circle cx="12" cy="9" r="4.5"/><path d="M8.5 12.5 6 20l6-2 6 2-2.5-7.5"/>',
+  pet: '<circle cx="7.5" cy="10" r="1.7"/><circle cx="12" cy="8" r="1.7"/><circle cx="16.5" cy="10" r="1.7"/><path d="M9 15.5c0-2 1.5-3.5 3-3.5s3 1.5 3 3.5c0 1.6-1.3 2.5-3 2.5s-3-.9-3-2.5z"/>',
+};
+
+/** Normaliza uma categoria e escolhe o ícone do placeholder. */
+function iconeDaCategoria(cat) {
+  const c = String(cat || '').toLowerCase();
+  if (/ra[çc][aã]o|alimento|comida|petfood/.test(c)) return ICONE_CATEGORIA.racao;
+  if (/petisco|snack|osso|bifinho|biscoito/.test(c)) return ICONE_CATEGORIA.petisco;
+  if (/areia|granulado|sanit[aá]ri/.test(c)) return ICONE_CATEGORIA.areia;
+  if (/brinquedo|toy|bola/.test(c)) return ICONE_CATEGORIA.brinquedo;
+  if (/higien|shampoo|banho|limpez|tapete/.test(c)) return ICONE_CATEGORIA.higiene;
+  if (/farm|medic|rem[eé]dio|vermif|antipulg|sa[uú]de/.test(c)) return ICONE_CATEGORIA.farmacia;
+  if (/coleira|guia|acess|cama|comedouro|bebedouro|roupa/.test(c)) return ICONE_CATEGORIA.acessorio;
+  return ICONE_CATEGORIA.pet;
+}
+
+function placeholderFoto(cat, classe) {
+  return '<div class="' + classe + '" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+    + ' stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + iconeDaCategoria(cat) + '</svg></div>';
+}
+
+function urlFoto(p) {
+  return p && p.imagem_path ? STORAGE_PUBLICO + encodeURIComponent(p.imagem_path) : '';
+}
+
 // ------------------------------------------------------------------ tela
 
 function iniciar() {
@@ -318,15 +356,19 @@ function iniciar() {
   const estado = {
     empresa: '',
     lojas: [],
-    loja: null,
-    coords: null,
-    carrinho: new Map(),            // id → { id, nome, preco, unidade, qtd }
-    produtos: new Map(),            // cache do que já apareceu na tela
+    loja: null,                     // loja escolhida (commit no "Continuar")
+    sugerida: null,                 // loja mais próxima do endereço, ainda não commitada
+    coords: null,                   // { lat, lng } do endereço/GPS
+    endereco: null,                 // { cep, rua, numero, bairro, complemento, localidade, uf }
+    carrinho: new Map(),            // id → { id, nome, preco, unidade, qtd, imagem_path, categoria }
+    produtos: new Map(),
     cat: { q: '', categoria: '', offset: 0, temMais: false, seq: 0, categorias: null },
     ultimo: null,
     temPedidoAberto: false,
     polling: null,
     passo: 'passoLocal',
+    verLojas: false,
+    codigoLink: null,
   };
 
   // -------------------------------------------------------------- armazenamento
@@ -377,8 +419,6 @@ function iniciar() {
   }
 
   // -------------------------------------------------------------- navegação
-  // Cada passo entra no histórico: o botão voltar do Android volta um passo em vez de
-  // fechar a página e jogar o carrinho fora.
   function mostrarPasso(passo, empilhar) {
     for (const id of ['passoLocal', 'passoCatalogo', 'passoCarrinho', 'passoEnviado']) {
       $(id).hidden = id !== passo;
@@ -389,8 +429,6 @@ function iniciar() {
     window.scrollTo(0, 0);
     if (passo !== 'passoCatalogo') { const h = $(titulo); if (h) h.focus({ preventScroll: true }); }
     $('lojaChip').hidden = !estado.loja || passo === 'passoLocal' || passo === 'passoEnviado';
-    // Quem abre o link da loja cai direto nos produtos: o aviso do pedido em andamento
-    // precisa aparecer ali também, não só na escolha da loja.
     $('pedidoAberto').hidden = !estado.temPedidoAberto || !(passo === 'passoLocal' || passo === 'passoCatalogo');
     if (passo !== 'passoEnviado') pararPolling();
     atualizarAvisosHorario();
@@ -412,7 +450,6 @@ function iniciar() {
     const t = totaisCarrinho(itens, estado.loja ? estado.loja.frete : 0);
     const minimo = estado.loja ? Number(estado.loja.pedido_minimo) || 0 : 0;
     const falta = faltaParaMinimo(t.subtotal, minimo);
-    // Faixa do mínimo: só enquanto escolhe. No carrinho o aviso fica junto dos totais.
     const faixa = $('barraMin');
     if (estado.passo === 'passoCatalogo' && t.quantidade && falta > 0) {
       $('barraMinTexto').textContent = 'Faltam ' + fmtBRL(falta) + ' para o pedido mínimo de ' + fmtBRL(minimo);
@@ -462,118 +499,203 @@ function iniciar() {
     else if (estado.passo === 'passoCarrinho') enviarPedido();
   });
 
-  // -------------------------------------------------------------- 1 · lojas
-  function renderLojas() {
+  // -------------------------------------------------------------- 1 · endereço
+  function detalhesLoja(l) {
+    return [
+      l.bairro,
+      Number(l.frete) > 0 ? 'entrega ' + fmtBRL(l.frete) : 'entrega grátis',
+      Number(l.pedido_minimo) > 0 ? 'mínimo ' + fmtBRL(l.pedido_minimo) : '',
+    ].filter(Boolean).join(' · ');
+  }
+
+  function renderLojaSugerida() {
+    const box = $('lojaSugerida');
+    const l = estado.sugerida;
+    if (!l) { box.hidden = true; box.innerHTML = ''; return; }
+    const dist = l.distancia_km != null
+      ? '<span class="dist">' + esc(String(l.distancia_km).replace('.', ',')) + ' km</span>' : '';
+    box.innerHTML = '<div class="loja-sug">'
+      + '<span class="pino" aria-hidden="true">' + icone('ok') + '</span>'
+      + '<b>' + esc(l.nome) + '</b>' + dist
+      + '<small>Entrega neste endereço · ' + esc(detalhesLoja(l)) + '</small>'
+      + '</div>';
+    box.hidden = false;
+  }
+
+  function renderListaLojas() {
     const box = $('listaLojas');
-    if (!estado.lojas.length) {
-      box.innerHTML = '<p class="vazio">Nenhuma loja está recebendo pedidos pelo site agora.</p>';
-      return;
-    }
-    const comGps = !!estado.coords;
-    const melhor = comGps ? estado.lojas.find((l) => l.atende) : null;
+    if (!estado.verLojas) { box.hidden = true; return; }
+    const comDist = estado.lojas.some((l) => l.distancia_km != null);
     const agora = agoraNaLoja();
     box.innerHTML = estado.lojas.map((l) => {
       const sit = situacaoHorario(l.horarios, agora.dia, agora.minutos);
       const linhaHorario = sit
-        ? '<br><span class="hor ' + (sit.aberta ? 'aberta' : 'fechada') + '">' + esc(sit.texto) + '</span>'
-        : '';
-      const fora = comGps && l.atende === false;
-      // Espaço não separável: a linha quebra entre os itens, nunca entre "mínimo" e o valor.
-      const detalhes = [
-        l.bairro,
-        Number(l.frete) > 0 ? 'entrega ' + fmtBRL(l.frete) : 'entrega grátis',
-        Number(l.pedido_minimo) > 0 ? 'mínimo ' + fmtBRL(l.pedido_minimo) : '',
-      ].filter(Boolean).join(' · ');
+        ? '<br><span class="hor ' + (sit.aberta ? 'aberta' : 'fechada') + '">' + esc(sit.texto) + '</span>' : '';
+      const fora = comDist && l.atende === false;
       const dist = l.distancia_km != null
         ? '<span class="dist">' + esc(String(l.distancia_km).replace('.', ',')) + ' km<em>'
-          + (fora ? 'fora da área' : 'entrega aqui') + '</em></span>'
-        : '';
-      return '<button type="button" class="loja' + (fora ? ' fora' : '') + (melhor && melhor.id === l.id ? ' sugerida' : '')
+          + (fora ? 'fora da área' : 'entrega aqui') + '</em></span>' : '';
+      return '<button type="button" class="loja' + (fora ? ' fora' : '')
+        + (estado.sugerida && estado.sugerida.id === l.id ? ' sugerida' : '')
         + '" data-loja="' + esc(l.id) + '"' + (fora ? ' aria-disabled="true"' : '') + '>'
         + '<b>' + esc(l.nome) + '</b>' + dist
-        + '<small>' + esc(detalhes) + (l.horario ? '<br>' + esc(l.horario) : '') + linhaHorario + '</small>'
+        + '<small>' + esc(detalhesLoja(l)) + (l.horario ? '<br>' + esc(l.horario) : '') + linhaHorario + '</small>'
         + '</button>';
     }).join('');
+    box.hidden = false;
   }
+
+  function podeContinuar() {
+    const rua = $('fRua').value.trim();
+    const numero = $('fNumero').value.trim();
+    return !!(estado.sugerida && rua.length >= 3 && numero.length >= 1);
+  }
+
+  function atualizarContinuar() {
+    $('btnContinuar').disabled = !podeContinuar();
+  }
+
+  function aplicarEndereco(dados, comGps) {
+    estado.empresa = dados.empresa || estado.empresa || '';
+    if (estado.empresa) { $('marca').textContent = estado.empresa; document.title = 'Fazer pedido · ' + estado.empresa; }
+    estado.lojas = dados.lojas || [];
+    estado.coords = (dados.lat != null && dados.lng != null) ? { lat: dados.lat, lng: dados.lng } : estado.coords;
+    if (!comGps) {
+      estado.endereco = {
+        cep: dados.cep || '', rua: dados.logradouro || '', numero: $('fNumero').value.trim(),
+        bairro: dados.bairro || '', complemento: $('fComplemento').value.trim(),
+        localidade: dados.localidade || '', uf: dados.uf || '',
+      };
+      if (dados.logradouro && !$('fRua').value.trim()) $('fRua').value = dados.logradouro;
+      if (dados.bairro && !$('fBairro').value.trim()) $('fBairro').value = dados.bairro;
+    }
+    $('endDetalhe').hidden = false;
+    const linkLoja = estado.codigoLink ? encontrarLojaPorLink(estado.lojas, estado.codigoLink) : null;
+    estado.sugerida = lojaMaisProxima(estado.lojas) || linkLoja || null;
+    renderLojaSugerida();
+    // Sem loja que atenda: mostra o aviso e deixa escolher manualmente.
+    const foraBox = $('foraArea');
+    if (!estado.sugerida && estado.lojas.length) {
+      const perto = estado.lojas[0];
+      const link = perto && perto.whatsapp
+        ? linkWhatsApp(perto.whatsapp, 'Olá! Queria fazer um pedido, mas o site diz que meu endereço está fora da área de entrega.') : '';
+      foraBox.innerHTML = '<div class="aviso erro"><b>Ainda não entregamos nesse endereço.</b>'
+        + (perto && perto.distancia_km != null
+          ? ' A loja mais perto, ' + esc(perto.nome) + ', fica a ' + esc(String(perto.distancia_km).replace('.', ',')) + ' km.' : '')
+        + (link ? '<a class="btn zap bloco" target="_blank" rel="noopener" href="' + esc(link) + '">Falar com a loja no WhatsApp</a>' : '')
+        + '</div>';
+      foraBox.hidden = false;
+    } else {
+      foraBox.hidden = true;
+    }
+    $('btnOutrasLojas').hidden = estado.lojas.length < 2;
+    renderListaLojas();
+    atualizarContinuar();
+  }
+
+  async function buscarCep() {
+    const cep = soCep($('fCep').value);
+    const msg = $('cepMsg');
+    msg.classList.remove('erro');
+    if (cep.length !== 8) { msg.textContent = 'Informe um CEP com 8 dígitos.'; msg.classList.add('erro'); return; }
+    $('btnBuscarCep').disabled = true;
+    msg.textContent = 'Procurando seu endereço…';
+    try {
+      const dados = await api('endereco', { cep });
+      msg.textContent = dados.sem_coordenadas
+        ? 'Encontramos o endereço. Confirme o número; se a loja não aparecer, escolha abaixo.'
+        : '';
+      aplicarEndereco(dados, false);
+      if (dados.sem_coordenadas) { estado.verLojas = true; renderListaLojas(); $('btnOutrasLojas').hidden = true; }
+      $('fNumero').focus({ preventScroll: true });
+    } catch (e) {
+      msg.textContent = e.message; msg.classList.add('erro');
+    } finally {
+      $('btnBuscarCep').disabled = false;
+    }
+  }
+
+  $('fCep').addEventListener('input', () => {
+    const c = $('fCep');
+    c.value = mascaraCep(c.value);
+    if (soCep(c.value).length === 8) buscarCep();
+  });
+  $('btnBuscarCep').addEventListener('click', buscarCep);
+  $('formEndereco').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); if (ev.target.id === 'fCep') buscarCep(); else atualizarContinuar(); }
+  });
+  ['fRua', 'fNumero', 'fBairro', 'fComplemento'].forEach((id) => {
+    $(id).addEventListener('input', () => {
+      if (estado.endereco) {
+        estado.endereco.rua = $('fRua').value.trim();
+        estado.endereco.numero = $('fNumero').value.trim();
+        estado.endereco.bairro = $('fBairro').value.trim();
+        estado.endereco.complemento = $('fComplemento').value.trim();
+      }
+      atualizarContinuar();
+    });
+  });
+
+  $('btnOutrasLojas').addEventListener('click', () => {
+    estado.verLojas = !estado.verLojas;
+    $('btnOutrasLojas').textContent = estado.verLojas ? 'Ocultar lojas' : 'Ver outras lojas';
+    renderListaLojas();
+  });
 
   $('listaLojas').addEventListener('click', (ev) => {
     const b = ev.target.closest('[data-loja]');
     if (!b) return;
     const loja = estado.lojas.find((l) => l.id === b.dataset.loja);
     if (!loja) return;
-    if (estado.coords && loja.atende === false) {
-      toast('Essa loja não entrega no seu endereço.');
-      return;
-    }
-    escolherLoja(loja);
+    if (estado.coords && loja.atende === false) { toast('Essa loja não entrega no seu endereço.'); return; }
+    estado.sugerida = loja;
+    renderLojaSugerida();
+    renderListaLojas();
+    atualizarContinuar();
+    $('lojaSugerida').scrollIntoView({ block: 'center' });
   });
 
-  async function carregarLojas(coords) {
-    const dados = await api('lojas', coords ? { lat: coords.lat, lng: coords.lng } : {});
-    estado.empresa = dados.empresa || '';
-    estado.lojas = dados.lojas || [];
-    if (estado.empresa) {
-      $('marca').textContent = estado.empresa;
-      document.title = 'Fazer pedido · ' + estado.empresa;
-    }
-    renderLojas();
-  }
+  $('btnContinuar').addEventListener('click', () => {
+    if (!podeContinuar()) { atualizarContinuar(); return; }
+    if (!estado.endereco) estado.endereco = { cep: soCep($('fCep').value), localidade: '', uf: '' };
+    estado.endereco.rua = $('fRua').value.trim();
+    estado.endereco.numero = $('fNumero').value.trim();
+    estado.endereco.bairro = $('fBairro').value.trim();
+    estado.endereco.complemento = $('fComplemento').value.trim();
+    guardar(CHAVE_DADOS, Object.assign(ler(CHAVE_DADOS) || {}, { endereco_v2: estado.endereco }));
+    escolherLoja(estado.sugerida);
+  });
 
+  // GPS: atalho para achar a loja mais perto. O endereço (rua/número) ainda é digitado.
   $('btnLocalizacao').addEventListener('click', () => {
     const msg = $('localMsg');
     msg.classList.remove('erro');
-    $('foraArea').hidden = true;
-    if (!('geolocation' in navigator)) {
-      msg.textContent = 'Este aparelho não informa a localização. Escolha a loja abaixo.';
-      return;
-    }
+    if (!('geolocation' in navigator)) { msg.textContent = 'Este aparelho não informa a localização. Use o CEP acima.'; return; }
     const btn = $('btnLocalizacao');
     btn.disabled = true;
     msg.textContent = 'Procurando a loja mais perto…';
     navigator.geolocation.getCurrentPosition(async (pos) => {
-      estado.coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
       try {
-        await carregarLojas(estado.coords);
-        const melhor = estado.lojas.find((l) => l.atende);
-        if (melhor) {
-          msg.textContent = '';
-          toast('Loja ' + melhor.nome + ' · ' + String(melhor.distancia_km).replace('.', ',') + ' km de você');
-          escolherLoja(melhor);
-        } else {
-          msg.textContent = '';
-          mostrarForaDeArea();
-        }
-      } catch (e) {
-        msg.textContent = e.message;
-        msg.classList.add('erro');
-      } finally {
-        btn.disabled = false;
-      }
+        const dados = await api('lojas', coords);
+        dados.lat = coords.lat; dados.lng = coords.lng;
+        aplicarEndereco(dados, true);
+        msg.textContent = estado.sugerida
+          ? 'Loja ' + estado.sugerida.nome + ' é a mais perto. Confirme rua e número abaixo.'
+          : '';
+        $('fRua').focus({ preventScroll: true });
+      } catch (e) { msg.textContent = e.message; msg.classList.add('erro'); }
+      finally { btn.disabled = false; }
     }, (erro) => {
-      btn.disabled = false;
-      msg.classList.add('erro');
+      btn.disabled = false; msg.classList.add('erro');
       msg.textContent = erro.code === 1
-        ? 'A localização não foi liberada. Escolha a loja abaixo.'
-        : 'Não conseguimos pegar sua localização. Escolha a loja abaixo.';
+        ? 'A localização não foi liberada. Use o CEP acima.'
+        : 'Não conseguimos pegar sua localização. Use o CEP acima.';
     }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
   });
 
-  function mostrarForaDeArea() {
-    const box = $('foraArea');
-    const perto = estado.lojas[0];
-    const link = perto && perto.whatsapp
-      ? linkWhatsApp(perto.whatsapp, 'Olá! Queria fazer um pedido, mas o site diz que meu endereço está fora da área de entrega.')
-      : '';
-    box.innerHTML = '<div class="aviso erro"><b>Ainda não entregamos no seu endereço.</b>'
-      + (perto && perto.distancia_km != null
-        ? ' A loja mais perto, ' + esc(perto.nome) + ', fica a ' + esc(String(perto.distancia_km).replace('.', ',')) + ' km.'
-        : '')
-      + (link ? '<a class="btn zap bloco" target="_blank" rel="noopener" href="' + esc(link) + '">Falar com a loja no WhatsApp</a>' : '')
-      + '</div>';
-    box.hidden = false;
-  }
-
   function escolherLoja(loja) {
+    if (!loja) return;
     const salvo = ler(CHAVE_CARRINHO);
     if (estado.loja && estado.loja.id !== loja.id && estado.carrinho.size) {
       estado.carrinho.clear();
@@ -617,17 +739,39 @@ function iniciar() {
       + '</div>';
   }
 
-  function linhaProduto(p) {
+  function fotoProduto(p, classeImg, classePh) {
+    const url = urlFoto(p);
+    return url
+      ? '<img class="' + classeImg + '" src="' + esc(url) + '" alt="" loading="lazy" decoding="async"'
+        + ' data-foto data-cat="' + esc(p.categoria || '') + '">'
+      : placeholderFoto(p.categoria, classePh);
+  }
+
+  function cardProduto(p) {
     const granel = ehGranel(p.unidade);
-    // No cadastro, "embalagem" quase sempre repete a unidade (UN, KG). Só aparece quando diz algo.
     const embalagem = /^(un|und|unid|kg|pc|pç|cx)$/i.test(String(p.embalagem || '').trim()) ? '' : p.embalagem;
     const meta = [embalagem, granel ? 'vendido por kg' : ''].filter(Boolean).join(' · ');
     return '<div class="prod" data-prod="' + esc(p.id) + '">'
-      + '<div><div class="prod-nome">' + esc(p.nome) + '</div>'
+      + fotoProduto(p, 'prod-foto', 'prod-ph')
+      + '<div class="prod-corpo">'
+      + '<div class="prod-nome">' + esc(p.nome) + '</div>'
       + (meta ? '<div class="prod-meta">' + esc(meta) + '</div>' : '')
-      + '<div class="prod-preco">' + fmtBRL(p.preco) + (granel ? ' <small>/kg</small>' : '') + '</div></div>'
+      + '<div class="prod-preco">' + fmtBRL(p.preco) + (granel ? ' <small>/kg</small>' : '') + '</div>'
       + '<div class="prod-acao">' + controleProduto(p) + '</div>'
-      + '</div>';
+      + '</div></div>';
+  }
+
+  // Foto que não carrega volta para o placeholder da categoria (CSP não deixa usar
+  // onerror inline; ligamos o listener após inserir).
+  function ligarFallbackFotos(container) {
+    container.querySelectorAll('img[data-foto]').forEach((img) => {
+      img.addEventListener('error', () => {
+        const div = document.createElement('div');
+        div.innerHTML = placeholderFoto(img.dataset.cat, 'prod-foto prod-ph');
+        const ph = div.firstElementChild;
+        if (ph && img.parentNode) img.parentNode.replaceChild(ph, img);
+      }, { once: true });
+    });
   }
 
   async function carregarProdutos(anexar) {
@@ -636,8 +780,6 @@ function iniciar() {
     const fimDaEspera = () => { box.classList.remove('buscando'); box.removeAttribute('aria-busy'); };
     if (!anexar) {
       estado.cat.offset = 0;
-      // Com produtos na tela, a lista fica apagada até a resposta chegar, em vez de
-      // sumir e voltar a cada letra digitada.
       if (box.querySelector('.prod')) {
         box.classList.add('buscando');
         box.setAttribute('aria-busy', 'true');
@@ -650,16 +792,17 @@ function iniciar() {
       const r = await api('catalogo', {
         store_id: estado.loja.id, q: estado.cat.q, categoria: estado.cat.categoria, offset: estado.cat.offset,
       });
-      if (seq !== estado.cat.seq) return;                // resposta velha: já digitaram outra coisa
+      if (seq !== estado.cat.seq) return;
       fimDaEspera();
       const itens = r.itens || [];
       for (const p of itens) estado.produtos.set(p.id, p);
       if (r.categorias) { estado.cat.categorias = r.categorias; renderCategorias(); }
       estado.cat.offset += itens.length;
       estado.cat.temMais = !!r.tem_mais;
-      const html = itens.map(linhaProduto).join('');
+      const html = itens.map(cardProduto).join('');
       if (anexar) box.insertAdjacentHTML('beforeend', html);
       else box.innerHTML = html || semResultado();
+      ligarFallbackFotos(box);
       $('btnMais').hidden = !estado.cat.temMais;
     } catch (e) {
       if (seq !== estado.cat.seq) return;
@@ -669,13 +812,10 @@ function iniciar() {
     }
   }
 
-  // Busca sem resultado não pode ser beco sem saída: a loja pode ter o produto e ele
-  // não estar no site (categoria oculta, cadastro com outro nome).
   function semResultado() {
     const q = estado.cat.q;
     const link = q && estado.loja && estado.loja.whatsapp
-      ? linkWhatsApp(estado.loja.whatsapp, mensagemProdutoNaoEncontrado(q))
-      : '';
+      ? linkWhatsApp(estado.loja.whatsapp, mensagemProdutoNaoEncontrado(q)) : '';
     return '<div class="vazio"><p>Nenhum produto encontrado' + (q ? ' para “' + esc(q) + '”' : '') + '.</p>'
       + (link
         ? '<p class="apoio">A loja pode ter e ele não estar no site.</p>'
@@ -711,10 +851,11 @@ function iniciar() {
     if (!p) return;
     const atual = estado.carrinho.get(id);
     let nova;
-    if (acao === 'add') nova = 1;                       // granel também começa em 1 kg
+    if (acao === 'add') nova = 1;
     else nova = ajustarQtd(p.unidade, atual ? atual.qtd : 0, acao === 'mais' ? 1 : -1);
     if (nova > 0) {
-      estado.carrinho.set(id, { id, nome: p.nome, preco: Number(p.preco), unidade: p.unidade, qtd: nova });
+      estado.carrinho.set(id, { id, nome: p.nome, preco: Number(p.preco), unidade: p.unidade, qtd: nova,
+        imagem_path: p.imagem_path || null, categoria: p.categoria || '' });
     } else {
       estado.carrinho.delete(id);
     }
@@ -734,12 +875,30 @@ function iniciar() {
   });
 
   // -------------------------------------------------------------- 3 · carrinho
+  function textoEntrega() {
+    const e = estado.endereco || {};
+    const linha1 = [e.rua, e.numero].filter(Boolean).join(', ');
+    const linha2 = [e.bairro, e.localidade].filter(Boolean).join(' · ');
+    return { linha1, linha2, loja: estado.loja ? estado.loja.nome : '' };
+  }
+
+  function renderEntregaResumo() {
+    const box = $('entregaResumo');
+    if (!estado.endereco || !estado.loja) { box.hidden = true; return; }
+    const t = textoEntrega();
+    $('entregaResumoTxt').innerHTML = '<b>' + esc(t.linha1 || 'Endereço de entrega') + '</b>'
+      + '<small>' + esc([t.linha2, t.loja ? 'entrega pela ' + t.loja : ''].filter(Boolean).join(' · ')) + '</small>';
+    box.hidden = false;
+  }
+
   function renderCarrinho() {
     const itens = [...estado.carrinho.values()];
     const loja = estado.loja || {};
     const t = totaisCarrinho(itens, loja.frete);
+    renderEntregaResumo();
     $('itensCarrinho').innerHTML = itens.length
       ? itens.map((it) => '<div class="item-car" data-item="' + esc(it.id) + '">'
+          + fotoProduto(it, 'mini-foto', 'mini-ph')
           + '<div><div class="prod-nome">' + esc(it.nome) + '</div>'
           + '<div class="prod-meta">' + fmtBRL(it.preco) + (ehGranel(it.unidade) ? '/kg' : ' cada') + '</div></div>'
           + '<button type="button" class="remover" data-acao="remover" data-id="' + esc(it.id) + '">Remover</button>'
@@ -747,6 +906,7 @@ function iniciar() {
           + '<span class="sub">' + fmtBRL(arred2(it.qtd * it.preco)) + '</span></div>'
           + '</div>').join('')
       : '<p class="vazio">Seu carrinho está vazio.</p>';
+    ligarFallbackFotos($('itensCarrinho'));
     $('tSub').textContent = fmtBRL(t.subtotal);
     $('tFrete').textContent = t.frete > 0 ? fmtBRL(t.frete) : 'Grátis';
     $('tTotal').textContent = fmtBRL(t.total);
@@ -775,19 +935,24 @@ function iniciar() {
   });
 
   $('btnVoltarCatalogo').addEventListener('click', () => history.back());
+  $('btnEditarEndereco').addEventListener('click', () => mostrarPasso('passoLocal', true));
 
   function preencherDados() {
     const d = ler(CHAVE_DADOS);
     if (!d) return;
-    for (const [campo, id] of [['nome', 'fNome'], ['telefone', 'fFone'], ['endereco', 'fEndereco'],
-      ['bairro', 'fBairro'], ['complemento', 'fComplemento']]) {
-      if (d[campo] && !$(id).value) $(id).value = d[campo];
+    if (d.nome && !$('fNome').value) $('fNome').value = d.nome;
+    if (d.telefone && !$('fFone').value) $('fFone').value = mascaraFone(d.telefone);
+    // Endereço lembrado (v2): repõe no passo 1.
+    const e = d.endereco_v2;
+    if (e) {
+      if (e.cep) $('fCep').value = mascaraCep(e.cep);
+      if (e.rua) $('fRua').value = e.rua;
+      if (e.numero) $('fNumero').value = e.numero;
+      if (e.bairro) $('fBairro').value = e.bairro;
+      if (e.complemento) $('fComplemento').value = e.complemento;
     }
-    $('fFone').value = mascaraFone($('fFone').value);
   }
 
-  // Máscara só quando o cursor está no fim: editar no meio do número não faz o
-  // cursor pular para o final a cada tecla.
   $('fFone').addEventListener('input', () => {
     const c = $('fFone');
     if (c.selectionStart !== c.value.length) return;
@@ -796,44 +961,40 @@ function iniciar() {
   });
   $('fFone').addEventListener('blur', () => { $('fFone').value = mascaraFone($('fFone').value); });
 
-  // Enter do teclado do celular leva ao próximo campo em vez de enviar o pedido sem querer.
-  const ORDEM_CAMPOS = ['fNome', 'fFone', 'fEndereco', 'fBairro', 'fComplemento'];
+  const ORDEM_CAMPOS = ['fNome', 'fFone'];
   $('formPedido').addEventListener('keydown', (ev) => {
     if (ev.key !== 'Enter' || ev.target.tagName === 'TEXTAREA' || ev.target.type === 'checkbox') return;
     ev.preventDefault();
     const i = ORDEM_CAMPOS.indexOf(ev.target.id);
-    if (i >= 0 && i < ORDEM_CAMPOS.length - 1) {
-      $(ORDEM_CAMPOS[i + 1]).focus();
-    } else if (ev.target.id === 'fComplemento') {
-      ev.target.blur();
-      $('pagDinheiro').closest('fieldset').scrollIntoView({ block: 'center' });
-    } else if (ev.target.id === 'fTroco') {
-      $('fObs').focus();
-    } else {
-      ev.target.blur();
-    }
+    if (i >= 0 && i < ORDEM_CAMPOS.length - 1) $(ORDEM_CAMPOS[i + 1]).focus();
+    else if (ev.target.id === 'fFone') { ev.target.blur(); $('pagDinheiro').closest('fieldset').scrollIntoView({ block: 'center' }); }
+    else if (ev.target.id === 'fTroco') $('fObs').focus();
+    else ev.target.blur();
   });
 
   document.querySelectorAll('input[name="pagamento"]').forEach((r) => {
-    r.addEventListener('change', () => { $('trocoWrap').hidden = !$('pagDinheiro').checked; });
+    r.addEventListener('change', () => {
+      $('trocoWrap').hidden = !$('pagDinheiro').checked;
+      $('pixNota').hidden = !$('pagPix').checked;
+    });
   });
 
   function lerFormulario() {
     const pag = document.querySelector('input[name="pagamento"]:checked');
+    const e = estado.endereco || {};
+    const endereco = [e.rua, e.numero].filter(Boolean).join(', ');
     return {
       nome: $('fNome').value.trim(),
       telefone: $('fFone').value.trim(),
-      endereco: $('fEndereco').value.trim(),
-      bairro: $('fBairro').value.trim(),
-      complemento: $('fComplemento').value.trim(),
+      endereco,
+      bairro: e.bairro || '',
+      complemento: e.complemento || '',
       pagamento: pag ? pag.value : '',
       troco_para: pag && pag.value === 'dinheiro' ? lerDinheiro($('fTroco').value) : null,
       obs: $('fObs').value.trim(),
     };
   }
 
-  // Erro de campo aparece colado no campo. No fim do formulário ele ficava fora da tela:
-  // o cliente via o cursor no Nome e não sabia por que o pedido não foi.
   function limparErroCampo() {
     const e = $('erroCampo');
     if (e) e.remove();
@@ -877,7 +1038,6 @@ function iniciar() {
     const problema = validarPedido(dados, t, estado.loja.pedido_minimo);
     if (problema) {
       if (problema.campo) { mostrarErroCampo(problema.campo, problema.mensagem); return; }
-      // Carrinho vazio ou abaixo do mínimo: o aviso certo está no topo, junto dos totais.
       const minimo = $('avisoMinimo');
       if (!minimo.hidden) { minimo.scrollIntoView({ block: 'center' }); return; }
       msg.textContent = problema.mensagem;
@@ -892,14 +1052,15 @@ function iniciar() {
       const r = await api('criar', {
         pedido: Object.assign({}, dados, {
           store_id: estado.loja.id,
+          cep: estado.endereco ? soCep(estado.endereco.cep) : null,
           lat: estado.coords ? estado.coords.lat : null,
           lng: estado.coords ? estado.coords.lng : null,
+          pix_online: dados.pagamento === 'pix',
           itens: itens.map((it) => ({ product_id: it.id, qtd: it.qtd })),
         }),
       });
       if ($('fLembrar').checked) {
-        guardar(CHAVE_DADOS, { nome: dados.nome, telefone: dados.telefone, endereco: dados.endereco,
-          bairro: dados.bairro, complemento: dados.complemento });
+        guardar(CHAVE_DADOS, { nome: dados.nome, telefone: dados.telefone, endereco_v2: estado.endereco });
       } else {
         apagar(CHAVE_DADOS);
       }
@@ -907,11 +1068,10 @@ function iniciar() {
       salvarCarrinho();
       estado.ultimo = { token: r.token, codigo: r.codigo };
       guardar(CHAVE_ULTIMO, estado.ultimo);
-      // Substitui o histórico: voltar da tela de acompanhamento não pode reabrir o
-      // carrinho que acabou de ser enviado.
       history.replaceState({ passo: 'passoEnviado' }, '', '');
       mostrarPasso('passoEnviado', false);
       renderStatus({ codigo: r.codigo, status: 'pendente', loja: r.loja, total: r.total, itens: [] });
+      tratarPixAoCriar(r);
       atualizarStatus();
     } catch (e) {
       msg.textContent = e.message;
@@ -926,7 +1086,6 @@ function iniciar() {
   // -------------------------------------------------------------- 4 · acompanhamento
   function renderStatus(st) {
     const d = descreverStatus(st);
-    // Pedido feito com a loja fechada: dizer quando ela abre, em vez de "em instantes".
     if (st.status === 'pendente' && estado.loja && st.loja === estado.loja.nome) {
       const sit = situacaoDaLoja(estado.loja);
       if (sit && !sit.aberta) d.texto = 'A loja ' + estado.loja.nome + ' abre ' + sit.quando + ' e confirma seu pedido assim que abrir.';
@@ -967,11 +1126,77 @@ function iniciar() {
     return d;
   }
 
+  // -------------------------------------------------------------- PIX
+  let pixTimer = null;
+  function pararPix() { if (pixTimer) { clearInterval(pixTimer); pixTimer = null; } }
+
+  function mostrarPix(st) {
+    const box = $('pixBox');
+    if (!st || st.pix_status == null || st.pix_status === 'na_entrega' || st.pagamento !== 'pix') {
+      box.hidden = true; pararPix(); return;
+    }
+    box.hidden = false;
+    const pago = st.pix_status === 'pago';
+    const pix = st.pix || {};
+    $('pixValor').textContent = fmtBRL(st.total);
+    const pagar = $('pixPagar');
+    const vencido = $('pixVencido');
+    if (pago) {
+      pagar.hidden = true; vencido.hidden = true; pararPix();
+      $('pixMsg').textContent = '';
+      return;
+    }
+    if (st.pix_status === 'expirado' || !pix.copia_cola) {
+      pagar.hidden = true; vencido.hidden = false; pararPix();
+      return;
+    }
+    pagar.hidden = false; vencido.hidden = true;
+    if ($('pixCodigo').value !== pix.copia_cola) $('pixCodigo').value = pix.copia_cola;
+    $('pixValidade').textContent = pix.expira_em
+      ? 'O código vale por alguns minutos. Se vencer, você gera outro aqui.' : '';
+  }
+
+  function tratarPixAoCriar(r) {
+    if (r && r.pix_status && r.pix_status !== 'na_entrega') {
+      mostrarPix({ pagamento: 'pix', pix_status: r.pix_status, pix: r.pix, total: r.total });
+    } else if (r && r.pix_falhou) {
+      toast('Não deu para gerar o PIX; você paga na entrega.');
+    }
+  }
+
+  $('btnCopiarPix').addEventListener('click', async () => {
+    const cod = $('pixCodigo').value;
+    try { await navigator.clipboard.writeText(cod); toast('Código PIX copiado.'); }
+    catch (_) { $('pixCodigo').focus(); $('pixCodigo').select(); toast('Selecione e copie o código.'); }
+  });
+  $('btnJaPaguei').addEventListener('click', () => { toast('Estamos conferindo o pagamento…'); atualizarStatus(); });
+  $('btnNovoPix').addEventListener('click', async () => {
+    if (!estado.ultimo) return;
+    $('pixMsg').textContent = '';
+    $('btnNovoPix').disabled = true;
+    try {
+      const st = await api('pix', { token: estado.ultimo.token });
+      renderStatus(st); mostrarPix(st);
+    } catch (e) { $('pixMsg').textContent = e.message; }
+    finally { $('btnNovoPix').disabled = false; }
+  });
+  $('btnPixEntrega').addEventListener('click', async () => {
+    if (!estado.ultimo) return;
+    $('pixMsg').textContent = '';
+    $('btnPixEntrega').disabled = true;
+    try {
+      const st = await api('pix_na_entrega', { token: estado.ultimo.token });
+      renderStatus(st); mostrarPix(st); toast('Você vai pagar na entrega.');
+    } catch (e) { $('pixMsg').textContent = e.message; }
+    finally { $('btnPixEntrega').disabled = false; }
+  });
+
   async function atualizarStatus() {
     if (!estado.ultimo) return;
     try {
       const st = await api('status', { token: estado.ultimo.token });
       const d = renderStatus(st);
+      mostrarPix(st);
       if (!d.final && !estado.polling) {
         estado.polling = setInterval(() => { if (document.visibilityState === 'visible') atualizarStatus(); }, 20000);
       }
@@ -982,6 +1207,7 @@ function iniciar() {
 
   function pararPolling() {
     if (estado.polling) { clearInterval(estado.polling); estado.polling = null; }
+    pararPix();
   }
 
   document.addEventListener('visibilitychange', () => {
@@ -1009,6 +1235,8 @@ function iniciar() {
   if (!('geolocation' in navigator)) $('btnLocalizacao').hidden = true;
   preencherDados();
 
+  try { estado.codigoLink = new URLSearchParams(location.search).get('loja'); } catch (_) { /* sem URL */ }
+
   estado.ultimo = ler(CHAVE_ULTIMO);
   if (estado.ultimo && estado.ultimo.token) {
     api('status', { token: estado.ultimo.token }).then((st) => {
@@ -1022,34 +1250,8 @@ function iniciar() {
     }).catch(() => {});
   }
 
-  // Link da loja (?loja=<código>), vindo da saudação do WhatsApp daquela loja: o cliente
-  // já escolheu a loja ao escrever para ela, então vai direto para os produtos.
-  // Vale só na primeira carga — "trocar loja" depois volta para a lista normalmente.
-  let codigoDoLink = null;
-  try { codigoDoLink = new URLSearchParams(location.search).get('loja'); } catch (_) { /* sem URL */ }
-
-  function aplicarLinkDaLoja() {
-    if (!codigoDoLink) return;
-    const codigo = codigoDoLink;
-    codigoDoLink = null;
-    const loja = encontrarLojaPorLink(estado.lojas, codigo);
-    if (loja) { escolherLoja(loja); return; }
-    $('foraArea').innerHTML = '<div class="aviso">A loja deste link não está recebendo pedidos pelo site agora.'
-      + (estado.lojas.length ? ' Escolha uma das lojas abaixo.' : '') + '</div>';
-    $('foraArea').hidden = false;
-  }
-
-  // Se a segunda tentativa também falhar, volta o aviso com o botão — antes a lista
-  // ficava presa em "Carregando lojas…".
-  function carregarLojasComAviso() {
-    $('listaLojas').innerHTML = '<p class="carregando">Carregando lojas…</p>';
-    carregarLojas(estado.coords).then(aplicarLinkDaLoja, (e) => {
-      $('listaLojas').innerHTML = '<div class="aviso erro">' + esc(e.message)
-        + '<button type="button" class="btn fantasma bloco" id="btnRecarregarLojas">Tentar de novo</button></div>';
-      $('btnRecarregarLojas').addEventListener('click', carregarLojasComAviso);
-    });
-  }
-  carregarLojasComAviso();
+  // Se o cliente já tem endereço lembrado, tenta resolver a loja de cara.
+  if (soCep($('fCep').value).length === 8) buscarCep();
 }
 
 document.addEventListener('DOMContentLoaded', iniciar);

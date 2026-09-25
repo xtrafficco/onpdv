@@ -1056,7 +1056,7 @@ window.pdvOfflineCacheState = function(){
 // ============ CHECAGEM DE NOVA VERSÃO (caixa instalado) ============
 // O caixa roda dos arquivos locais; para saber se saiu versão nova, consulta o version.json
 // do site publicado e avisa (com link para baixar o instalador). Não aplica sozinho.
-const ONPDV_VERSION='2026.09.24-v61';
+const ONPDV_VERSION='2026.09.25-v62';
 const ONPDV_SITE='https://onpdv.vercel.app';
 // O badge do card "Instalador da Frente de Caixa" mostra a mesma versão. Preenchemos
 // por aqui para não existir um segundo lugar no código que alguém precise lembrar de
