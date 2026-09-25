@@ -1,5 +1,5 @@
 {
-  "version": "2026.09.25-v62",
+  "version": "2026.09.25-v63",
   "installer": "/downloads/onpdv-caixa.bat",
-  "notes": "Pedido pelo site refeito como app de compras: o cliente informa CEP e numero, o endereco escolhe automaticamente a loja mais perto que entrega, e o catalogo agora mostra os produtos com foto (placeholder por categoria enquanto a foto nao foi cadastrada). Seguranca reforcada no servidor: cada operador so cria e recebe venda na propria loja, o limite de credito do cliente so muda por administrador, e o recebimento PIX do PagBank so confirma apos consultar o banco. Na interface, texto secundario e cores de status com mais contraste. As mudancas de servidor ja estao no ar; reinstale o caixa para alinhar a versao e o visual."
+  "notes": "Nova aba Indicadores 360 (Inteligencia): um painel de diagnostico ao vivo por diretriz do sistema — vendas, caixa, estoque, clientes/recompra, contas, pagamentos, fiscal, entregas e saude tecnica — cada indicador com valor atual, meta, problema e acao, e farol verde/amarelo/vermelho recalculado a cada abertura. So o administrador ve. Tambem nesta versao: pedido pelo site refeito como app (CEP e numero escolhem a loja mais perto; catalogo com foto), upload de foto de produto no ERP, e reforcos de seguranca ja aplicados no servidor. Reinstale o caixa para atualizar a versao e o visual."
 }

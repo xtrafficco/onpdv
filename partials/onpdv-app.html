@@ -56,6 +56,7 @@
           <button class="bo-group-toggle" type="button" aria-expanded="false"><span>Inteligência</span><span aria-hidden="true">⌄</span></button>
           <div class="bo-group-items">
             <button data-page="decisao">🧭 Central de Decisão</button>
+            <button data-page="indicadores">📊 Indicadores 360</button>
             <button data-page="estoqueint">📦 Estoque inteligente</button>
             <button data-page="sortimento">🧩 Sortimento</button>
             <button data-page="contagemex">🎯 Contagem por exceção</button>
@@ -119,6 +120,7 @@
         </div>
         <button class="btn acc home-enter" id="btnEnterPdv2">🛒 Abrir Frente de Caixa</button>
       </div>
+      <div id="homeCriticos" hidden></div>
       <div class="stats" id="homeGeral"></div>
       <h2 class="home-sec">Lojas</h2>
       <div class="stats" id="homeStores"></div>
@@ -814,6 +816,10 @@
          O conteúdo é montado por assets/js/onpdv-raiox.js quando a página abre. -->
     <div id="page-raiox" class="page"></div>
 
+    <!-- ---- INDICADORES 360 (painel diagnóstico por diretriz) ----
+         Montado por renderIndicadores() em onpdv-app.js a partir da RPC erp_indicadores. -->
+    <div id="page-indicadores" class="page"></div>
+
     <!-- ---- TRANSFERÊNCIAS ---- -->
     <div id="page-transfer" class="page">
       <div class="card pad u-static-15">
@@ -1005,7 +1011,7 @@
       </div>
       <div class="card pad u-static-15" id="cardPdvInstaller">
         <div class="head"><h2>🛒 Instalador da Frente de Caixa</h2><span class="grow"></span>
-          <span class="chip ok" id="pdvInstallerVersion">2026.09.25 · v62</span>
+          <span class="chip ok" id="pdvInstallerVersion">2026.09.25 · v63</span>
           <a class="btn" href="downloads/onpdv-caixa.bat" download="onpdv-caixa.bat">⬇ Baixar ONPDV Caixa</a></div>
         <p class="muted u-static-56">
           Baixe este instalador em cada computador de venda. Ele instala o componente

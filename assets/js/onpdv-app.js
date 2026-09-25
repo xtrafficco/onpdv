@@ -554,7 +554,7 @@ async function maybePromptAdmin2FA(){
 }
 
 // ======================= NAV / BACKOFFICE =======================
-const PAGE_TITLES={ home:'Início', decisao:'Central de Decisão', importexcel:'Importação inteligente', financeiroint:'Financeiro inteligente', estoqueint:'Estoque inteligente',
+const PAGE_TITLES={ home:'Início', decisao:'Central de Decisão', indicadores:'Indicadores 360', importexcel:'Importação inteligente', financeiroint:'Financeiro inteligente', estoqueint:'Estoque inteligente',
   sortimento:'Gestão de sortimento', contagemex:'Contagem por exceção', granelint:'Granel inteligente', credint:'Crediário inteligente', cashbackint:'Cashback inteligente',
   simuladores:'Simuladores', assistente:'Assistente de gestão', pedidos:'Pedidos', entregas:'Entregas', clientes:'Clientes', vales:'Vale-presente', estoque:'Estoque',
   estoquecrm:'CRM inteligente · Estoque', validade:'Validade de lotes', inventario:'Inventário rotativo', nfimport:'NF-e importadas', encalhados:'Produtos encalhados', pedidoint:'Pedido inteligente', crediario:'Contas a receber',
@@ -631,6 +631,7 @@ function openBoPage(pg){
   const t=$('#boTitle'); if(t) t.textContent=PAGE_TITLES[pg]||'';
   if(pg==='home') loadHome();
   if(pg==='decisao') loadDecisionCenter();
+  if(pg==='indicadores') renderIndicadores();
   if(pg==='importexcel') renderImportExcel();
   if(pg==='financeiroint') renderFinanceiroInt();
   if(pg==='estoqueint') renderEstoqueInt();
@@ -709,6 +710,227 @@ function openRaioX(){
       toast(err.message,true);
     });
 }
+
+/* ============ INDICADORES 360 (painel diagnóstico por diretriz) ============
+   Dados crus vêm da RPC erp_indicadores (admin); a severidade e os textos de
+   problema/ação são calculados aqui, para o farol refletir sempre o número atual. */
+const INDIC_CSS = `
+#page-indicadores .ind-top{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px}
+#page-indicadores .ind-seg{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:3px}
+#page-indicadores .ind-seg button{border:0;background:transparent;color:var(--ink2);font-weight:800;font-size:13px;padding:7px 13px;border-radius:999px;cursor:pointer}
+#page-indicadores .ind-seg button.on{background:var(--dark);color:#fff}
+#page-indicadores .ind-spacer{flex:1}
+#page-indicadores .ind-chk{display:inline-flex;align-items:center;gap:7px;font-weight:700;font-size:13px;color:var(--ink2);cursor:pointer}
+#page-indicadores .ind-exec{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--red);border-radius:14px;padding:15px 17px;margin-bottom:20px}
+#page-indicadores .ind-exec h3{margin:0 0 8px;font-size:15px}
+#page-indicadores .ind-exec ol{margin:0;padding-left:20px;display:grid;gap:7px;font-size:13px}
+#page-indicadores .ind-exec b{color:var(--ink)} #page-indicadores .ind-exec span{color:var(--ink2)}
+#page-indicadores .ind-sec{margin:20px 0 0}
+#page-indicadores .ind-sec-h{display:flex;align-items:baseline;gap:10px;margin:0 0 10px;padding-bottom:7px;border-bottom:2px solid var(--line)}
+#page-indicadores .ind-sec-h h3{margin:0;font-size:16px;color:var(--dark)}
+#page-indicadores .ind-sec-h .c{color:var(--ink2);font-size:12px;font-weight:700}
+#page-indicadores .ind-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:11px}
+#page-indicadores .ind-card{background:var(--card);border:1px solid var(--line);border-radius:13px;overflow:hidden;display:flex;flex-direction:column}
+#page-indicadores .ind-card .s{height:4px}
+#page-indicadores .ind-card .b{padding:12px 14px 13px;display:flex;flex-direction:column;gap:6px;flex:1}
+#page-indicadores .ind-r1{display:flex;justify-content:space-between;align-items:flex-start;gap:9px}
+#page-indicadores .ind-nome{font-weight:800;font-size:13px;line-height:1.25}
+#page-indicadores .ind-pill{flex:none;font-weight:800;font-size:10px;letter-spacing:.03em;text-transform:uppercase;padding:4px 8px;border-radius:999px;white-space:nowrap}
+#page-indicadores .ind-val{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--ink);line-height:1.05}
+#page-indicadores .ind-meta{font-size:12px;color:var(--ink2);margin-top:-2px}
+#page-indicadores .ind-diag{font-size:12.5px;line-height:1.45;color:var(--ink)}
+#page-indicadores .ind-acao{font-size:12.5px;line-height:1.45;color:var(--ink2)}
+#page-indicadores .ind-acao::before{content:"→ ";color:var(--dark);font-weight:800}
+#page-indicadores .ind-fonte{font-size:11px;color:var(--ink2);border-top:1px dashed var(--line);padding-top:6px;display:none}
+#page-indicadores.showf .ind-fonte{display:block}
+#page-indicadores .sv-crit .s{background:var(--red)} #page-indicadores .sv-crit .ind-pill{background:var(--red-soft,rgba(217,75,69,.14));color:var(--red)}
+#page-indicadores .sv-warn .s{background:var(--amber)} #page-indicadores .sv-warn .ind-pill{background:rgba(226,164,0,.16);color:var(--amber)}
+#page-indicadores .sv-ok .s{background:var(--green)} #page-indicadores .sv-ok .ind-pill{background:var(--green-soft,rgba(34,166,90,.14));color:var(--green)}
+#page-indicadores .sv-info .s{background:var(--blue)} #page-indicadores .sv-info .ind-pill{background:rgba(59,125,224,.14);color:var(--blue)}
+#page-indicadores .ind-hide{display:none!important}
+`;
+const INDIC_SEV_LABEL={crit:'Crítico',warn:'Atenção',ok:'Saudável',info:'Info'};
+function indPct(a,b){ b=+b||0; return b? Math.round(1000*(+a||0)/b)/10 : 0; }
+function indMoney(v){ try{ return BRL(+v||0); }catch(_){ return 'R$ '+(+v||0).toFixed(2); } }
+function indNum(v){ return (+v||0).toLocaleString('pt-BR'); }
+
+function buildIndicadores(d){
+  const mix=d.mix||{}, pos=d.pos||{}, sp=d.site_pedidos||{};
+  const vp=+d.vendas_pagas||0;
+  const pctDin=indPct(mix['dinheiro'], vp), pctCartao=indPct(mix['cartao'], vp), pctPix=indPct(mix['pix'], vp);
+  const rupturaPct=indPct(d.skus_ruptura, d.skus_track);
+  const semFonePct=indPct(d.clientes_sem_fone, d.clientes_total);
+  const fotosPct=indPct(d.fotos_com, d.produtos_ativos);
+  const vivo = (+d.vendas_30d_ant>0) ? (+d.vendas_30d < 0.25*+d.vendas_30d_ant ? 'crit' : (+d.vendas_30d < 0.7*+d.vendas_30d_ant ? 'warn':'ok')) : 'info';
+  const posOk=+pos['aprovado']||0, posRuim=(+pos['cancelado']||0)+(+pos['negado']||0)+(+pos['processando']||0);
+  const integStale = d.integracao_check ? ((Date.now()-new Date(d.integracao_check).getTime())>2*864e5) : true;
+  const dcat=(d.desp_cat||[]), topCat=dcat[0]||null;
+  const agingTot=(+d.aging_0_30||0)+(+d.aging_31_60||0)+(+d.aging_60m||0);
+  const catPct=(topCat && +d.pagar_aberto_total>0)?indPct(topCat.v,d.pagar_aberto_total):0;
+  const devPct=(+d.fat_total>0)?indPct(d.devolucoes_total,d.fat_total):0;
+  const entradaProj=(+d.receita_dia_media||0)*30;
+  return [
+   {sec:'Adoção & operação diária', items:[
+    {n:'Uso ao vivo (vendas/30d)', v:indNum(d.vendas_30d), m:'Mês anterior: '+indNum(d.vendas_30d_ant)+' vendas', s:vivo,
+     diag:'<b>'+indNum(d.vendas_30d)+'</b> vendas ('+indMoney(d.fat_30d)+') nos últimos 30 dias vs <b>'+indNum(d.vendas_30d_ant)+'</b> ('+indMoney(d.fat_30d_ant)+') no mês anterior.',
+     acao:'Confirmar go-live das lojas e definir meta de vendas/dia por loja.', f:'sales · janelas de 30 e 30–60 dias'},
+    {n:'Caixas abertos sem fechar', v:indNum(d.caixas_abertos), m:'Meta: 0 ao fim do dia', s:(+d.caixas_abertos>5?'crit':(+d.caixas_abertos>0?'warn':'ok')),
+     diag:indNum(d.caixas_abertos)+' sessão(ões) de caixa seguem abertas.', acao:'Fechar o caixa a cada turno; alertar caixa aberto há +24 h.', f:'cash_sessions status=aberta'},
+    {n:'Diferença de caixa', v:indMoney(d.caixas_falta), m:d.caixas_dif+' sessão(ões) com diferença', s:(Math.abs(+d.caixas_falta)>50?'warn':'ok'),
+     diag:'Falta acumulada nos fechamentos.', acao:'Manter conferência na abertura e no fechamento.', f:'cash_sessions soma diferenca (fechada)'},
+   ]},
+   {sec:'Vendas & rentabilidade', items:[
+    {n:'Faturamento do período', v:indMoney(d.fat_total), m:indNum(d.vendas_pagas)+' vendas ('+d.periodo_ini+' a '+d.periodo_fim+')', s:'info',
+     diag:(d.por_loja||[]).map(l=>esc(l.nome)+' '+indMoney(l.fat)).join(' · '), acao:'Acompanhar por loja semana a semana.', f:'sales sum(total) status=paga'},
+    {n:'Ticket médio', v:indMoney(d.ticket_medio), m:(d.por_loja||[]).map(l=>esc(l.nome)+' '+indMoney(l.ticket)).join(' · '), s:'info',
+     diag:'Comparativo de ticket entre as lojas.', acao:'Testar combos/leve-mais onde o ticket é menor.', f:'sales avg(total) por loja'},
+    {n:'Dependência de dinheiro', v:pctDin+'%', m:'Cartão '+pctCartao+'% · PIX '+pctPix+'%', s:(pctDin>60?'warn':'ok'),
+     diag:'Dinheiro responde por '+pctDin+'% das vendas pagas.', acao:'Incentivar PIX no balcão (QR fixo): menos risco de caixa e troco.', f:'sales forma_pagamento'},
+    {n:'Taxa de cancelamento', v:(d.cancel_pct==null?'—':d.cancel_pct+'%'), m:'Meta: abaixo de 3%', s:(+d.cancel_pct>3?'warn':'ok'),
+     diag:'Percentual de vendas canceladas.', acao:'Investigar se passar de 3%.', f:'sales status=cancelada ÷ total'},
+    {n:'Margem bruta (estimada)', v:(d.margem_pct!=null?d.margem_pct+'%':'sem base'), m:'amostra de '+indNum(d.vendas_com_custo)+' vendas com custo', s:(d.margem_pct==null?'crit':(+d.vendas_com_custo<(+d.vendas_pagas*0.1)?'warn':'ok')),
+     diag:(d.margem_pct!=null?'Margem de <b>'+d.margem_pct+'%</b> nas vendas que têm custo — cobertura ainda baixa.':'Custo não gravado nas vendas — lucro não é medível.'), acao:'Gravar custo_unit em toda venda para medir a margem real de tudo, não só da amostra.', f:'sale_items: subtotal vs custo_unit'},
+   ]},
+   {sec:'Estoque', items:[
+    {n:'SKUs em ruptura', v:rupturaPct+'%', m:indNum(d.skus_ruptura)+' de '+indNum(d.skus_track)+' (≤ mínimo)', s:(rupturaPct>50?'crit':(rupturaPct>10?'warn':'ok')),
+     diag:indNum(d.skus_zerados)+' zerados; '+indNum(d.top50_ruptura)+' dos 50 campeões de venda sem saldo.', acao:'Inventário inicial por loja e entrada de estoque.', f:'store_stock saldo ≤ estoque_min'},
+    {n:'Estoque negativo', v:indNum(d.skus_negativos)+' SKUs', m:'Meta: 0', s:(+d.skus_negativos>0?'crit':'ok'),
+     diag:'Vendas saíram sem entrada prévia.', acao:'Corrigir por contagem; avisar venda que deixa saldo negativo.', f:'store_stock saldo < 0'},
+    {n:'Produtos sem custo', v:indNum(d.produtos_sem_custo), m:'Meta: 0', s:(+d.produtos_sem_custo>0?'warn':'ok'),
+     diag:'Afeta margem e sugestão de preço.', acao:'Completar custo no cadastro ou pela entrada de nota.', f:'products custo nulo/≤0'},
+   ]},
+   {sec:'Clientes & recompra (CRM)', items:[
+    {n:'Venda com cliente identificado', v:(d.vendas_com_cliente_pct==null?'—':d.vendas_com_cliente_pct+'%'), m:'Meta: acima de 30%', s:(+d.vendas_com_cliente_pct<30?'crit':'ok'),
+     diag:'Sem identificar o cliente, recompra e cashback ficam impossíveis.', acao:'Pedir CPF/telefone no PDV ao menos em parte das vendas.', f:'sales customer_id ÷ total'},
+    {n:'Clientes sem telefone', v:semFonePct+'%', m:indNum(d.clientes_sem_fone)+' de '+indNum(d.clientes_total), s:(semFonePct>50?'crit':(semFonePct>20?'warn':'ok')),
+     diag:'Sem telefone não há WhatsApp nem recompra.', acao:'Enriquecer o cadastro no caixa e remover duplicados.', f:'customers telefone < 10 dígitos'},
+    {n:'Clientes recorrentes', v:indNum(d.clientes_recorrentes), m:'clientes com 2+ compras', s:(+d.clientes_recorrentes<5?'warn':'ok'),
+     diag:'Depende da identificação na venda.', acao:'Resolve junto com a identificação no PDV.', f:'sales 2+ compras por cliente'},
+   ]},
+   {sec:'Fidelidade (cashback)', items:[
+    {n:'Cashback em uso', v:indMoney(d.cashback_gerado)+' / '+indMoney(d.cashback_resgatado), m:'gerado / resgatado', s:(+d.cashback_gerado>0?'ok':'warn'),
+     diag:'Recurso pronto; ativa-se junto com o cliente identificado.', acao:'Lançar uma campanha simples de cashback.', f:'cashback_ledger por kind'},
+   ]},
+   {sec:'Financeiro (contas)', items:[
+    {n:'Contas a pagar vencidas', v:indNum(d.payables_vencidas), m:indMoney(d.payables_valor_aberto)+' em aberto', s:(+d.payables_vencidas>0?'crit':'ok'),
+     diag:'Grande parte pode ser import não baixado.', acao:'Conciliar: baixar o que já foi pago e manter só a dívida real.', f:'payables vencidas'},
+    {n:'Contas a receber vencidas', v:indNum(d.receber_vencidas), m:'crediário', s:(+d.receber_vencidas>3?'warn':'ok'),
+     diag:'Recebíveis em atraso.', acao:'Reavaliar se o crediário crescer.', f:'receivables vencidas'},
+   ]},
+   {sec:'Financeiro (análise)', items:[
+    {n:'Saída de caixa · 30 dias', v:indMoney(d.pagar_vencer_30d), m:'contas a vencer · entrada projetada '+indMoney(entradaProj), s:((+d.pagar_vencer_30d)>entradaProj?'warn':'info'),
+     diag:'Compromissos que vencem nos próximos 30 dias.', acao:(+d.pagar_vencer_30d>entradaProj?'Saída acima da entrada projetada — negociar prazos ou reforçar o caixa.':'Programar o pagamento para não apertar o caixa.'), f:'payables a vencer em 30 dias'},
+    {n:'Aging de contas vencidas', v:indMoney(agingTot), m:'0–30 '+indMoney(d.aging_0_30)+' · 31–60 '+indMoney(d.aging_31_60)+' · +60 '+indMoney(d.aging_60m), s:(agingTot>0?'crit':'ok'),
+     diag:'Quanto mais antiga a dívida, mais cara (juros/negativação).', acao:'Conciliar o que já foi pago e renegociar o que é real, começando pelas faixas mais velhas.', f:'payables vencidas por faixa de dias'},
+    {n:'Concentração da despesa', v:(topCat?esc(topCat.cat)+' '+catPct+'%':'—'), m:(dcat.slice(1,4).map(c=>esc(c.cat)+' '+indMoney(c.v)).join(' · ')||'—'), s:(catPct>60?'warn':'info'),
+     diag:(topCat?'“'+esc(topCat.cat)+'” concentra '+catPct+'% do valor em aberto.':'Sem despesas em aberto.'), acao:'Negociar prazo/condição na categoria que mais pesa.', f:'payables abertas por categoria'},
+    {n:'Receita média por dia', v:indMoney(d.receita_dia_media), m:indNum(d.dias_com_venda)+' dias com venda no período', s:'info',
+     diag:'Média nos dias em que houve venda — base para meta diária por loja.', acao:'Definir meta diária e acompanhar contra esta média.', f:'sales fat ÷ dias com venda'},
+    {n:'Concentração de receita (Pareto)', v:(d.pareto_top20_pct==null?'—':d.pareto_top20_pct+'%'), m:'top 20% dos produtos', s:'info',
+     diag:(d.pareto_top20_pct!=null?d.pareto_top20_pct+'% da receita vem de 20% dos itens.':'Sem histórico suficiente.'), acao:'Priorizar esses SKUs em estoque e compra — nunca deixar faltar campeão.', f:'product_sales_history × preço'},
+    {n:'Custo fixo marcado', v:indMoney(d.custo_recorrente), m:'contas marcadas como recorrentes', s:(+d.custo_recorrente>0?'ok':'warn'),
+     diag:(+d.custo_recorrente>0?'Base do custo fixo mensal para projeção.':'Nenhuma conta marcada como recorrente — não dá para projetar o fixo.'), acao:'Marcar aluguel, salários e assinaturas como recorrentes.', f:'payables recorrente=true'},
+    {n:'Devoluções / estornos', v:indMoney(d.devolucoes_total), m:indNum(d.devolucoes_qtd)+' ocorrência(s) · '+devPct+'% da receita', s:(devPct>2?'warn':'ok'),
+     diag:'Peso das devoluções sobre a receita.', acao:'Monitorar; investigar se passar de 2%.', f:'sale_returns ÷ faturamento'},
+   ]},
+   {sec:'Pagamentos & conciliação', items:[
+    {n:'Intents de pagamento presos', v:indNum(d.pay_presos), m:'de '+indNum(d.pay_total)+' · Meta: < 5', s:(+d.pay_presos>5?'warn':'ok'),
+     diag:'Pagamentos eletrônicos pendentes há +1 dia (nem aprovados nem cancelados).', acao:'Reforçar reconsulta/expiração; painel de "dinheiro preso".', f:'payments pendente/processando > 24 h'},
+    {n:'Maquininha (Point)', v:indNum(posOk)+' ✓ / '+indNum(posRuim)+' ✕', m:'aprovados / demais', s:(posOk<posRuim?'warn':'ok'),
+     diag:'Cancelados '+(+pos['cancelado']||0)+' · negados '+(+pos['negado']||0)+' · processando '+(+pos['processando']||0)+'.', acao:'Revisar fluxo do Device ID e treinar.', f:'pos_payment_requests por status'},
+    {n:'Conciliação Mercado Pago', v:indNum(d.mp_settlements), m:'liquidações registradas', s:'info',
+     diag:'Base para conferir recebido × esperado.', acao:'Relatório de conciliação MP × pagamentos.', f:'mp_settlements'},
+   ]},
+   {sec:'Fiscal', items:[
+    {n:'Cobertura fiscal', v:indNum(d.fiscal_total), m:'documentos em '+indNum(d.vendas_pagas)+' vendas', s:(+d.fiscal_total===0?'crit':'ok'),
+     diag:'Emissão de NFC-e/NF-e no período.', acao:'Confirmar obrigação fiscal; se exigida, ligar emissão e monitorar autorização.', f:'fiscal_documents'},
+   ]},
+   {sec:'Pedido pelo site & entregas', items:[
+    {n:'Fotos de produto (vitrine)', v:fotosPct+'%', m:indNum(d.fotos_com)+' de '+indNum(d.produtos_ativos), s:(fotosPct<50?'warn':'ok'),
+     diag:'Vitrine do site abre com placeholder onde falta foto.', acao:'Subir fotos pelo ERP, começando pelos campeões de venda.', f:'products.imagem_path'},
+    {n:'Comprovação de entrega', v:indNum(d.entregas_sem_comprovante)+'/'+indNum(d.entregas_concluidas), m:'sem foto/assinatura', s:(+d.entregas_sem_comprovante>0?'warn':'ok'),
+     diag:'Entregas concluídas sem comprovante registrado.', acao:'Capturar foto/assinatura na entrega (campos já existem).', f:'deliveries delivered_at sem proof_at'},
+    {n:'Pedidos pelo site', v:indNum(Object.values(sp).reduce((a,b)=>a+(+b||0),0)), m:Object.entries(sp).map(([k,v])=>k+' '+v).join(' · ')||'—', s:'info',
+     diag:'Status dos pedidos recebidos pelo site.', acao:'Após ligar de vez, acompanhar taxa de aceite.', f:'site_pedidos por status'},
+   ]},
+   {sec:'Saúde técnica & segurança', items:[
+    {n:'Rotinas automáticas (7d)', v:indNum(d.jobs_ok_7d)+' ✓ / '+indNum(d.jobs_falha_7d)+' ✕', m:'ok / com falha', s:(+d.jobs_falha_7d>0?'warn':'ok'),
+     diag:'Execuções de cron/ops-worker na semana.', acao:'Investigar se houver falhas.', f:'operation_runs 7 dias'},
+    {n:'Erros no navegador (7d)', v:indNum(d.erros_cliente_7d), m:'Meta: baixo e estável', s:(+d.erros_cliente_7d>20?'warn':'ok'),
+     diag:'Erros de cliente registrados na semana.', acao:'Observar picos após publicações.', f:'client_error_log 7 dias'},
+    {n:'Healthcheck de integração', v:(d.integracao_check?new Date(d.integracao_check).toLocaleDateString('pt-BR'):'nunca'), m:'última checagem', s:(integStale?'warn':'ok'),
+     diag:'Monitor de saúde de integração.', acao:integStale?'Revisar o healthcheck do ops-worker.':'Em dia.', f:'integration_health max(checked_at)'},
+   ]},
+  ];
+}
+
+function renderIndicadores(){
+  const host=$('#page-indicadores'); if(!host) return;
+  if(!document.getElementById('indic-css')){ const st=document.createElement('style'); st.id='indic-css'; st.textContent=INDIC_CSS; document.head.appendChild(st); }
+  host.innerHTML='<div class="card pad">Carregando indicadores…</div>';
+  Promise.all([sb.rpc('erp_indicadores'), sb.rpc('erp_indicadores_fin')]).then(([r1,r2])=>{
+    if(r1.error) throw r1.error;
+    const data=Object.assign({}, r1.data||{}, (r2 && !r2.error && r2.data) ? r2.data : {});
+    const grupos=buildIndicadores(data||{});
+    const criticos=[]; grupos.forEach(g=>g.items.forEach(it=>{ if(it.s==='crit') criticos.push(it); }));
+    const exec = criticos.length
+      ? '<div class="ind-exec"><h3>⚠️ '+criticos.length+' ponto(s) crítico(s) agora</h3><ol>'
+        + criticos.map(it=>'<li><b>'+esc(it.n)+' ('+esc(it.v)+').</b> <span>'+it.acao+'</span></li>').join('')
+        + '</ol></div>'
+      : '<div class="ind-exec" style="border-left-color:var(--green)"><h3>✅ Nenhum indicador crítico agora</h3></div>';
+    const secoes = grupos.map(g=>{
+      const cards=g.items.map(it=>
+        '<article class="ind-card sv-'+it.s+'" data-sev="'+it.s+'"><div class="s"></div><div class="b">'
+        +'<div class="ind-r1"><div class="ind-nome">'+esc(it.n)+'</div><span class="ind-pill">'+INDIC_SEV_LABEL[it.s]+'</span></div>'
+        +'<div class="ind-val">'+esc(it.v)+'</div><div class="ind-meta">'+esc(it.m)+'</div>'
+        +'<div class="ind-diag">'+it.diag+'</div><div class="ind-acao">'+it.acao+'</div>'
+        +'<div class="ind-fonte">Fonte: '+esc(it.f)+'</div></div></article>').join('');
+      return '<section class="ind-sec" data-grp><div class="ind-sec-h"><h3>'+esc(g.sec)+'</h3><span class="c">'+g.items.length+'</span></div><div class="ind-grid">'+cards+'</div></section>';
+    }).join('');
+    const ger = data && data.gerado_em ? new Date(data.gerado_em).toLocaleString('pt-BR') : '';
+    host.innerHTML=
+      '<div class="ind-top">'
+      +'<div class="ind-seg" id="indFiltro">'
+      +'<button data-f="all" class="on">Todos</button><button data-f="crit">Críticos</button><button data-f="warn">Atenção</button><button data-f="ok">Saudáveis</button></div>'
+      +'<button class="btn ghost sm" id="indReload">↻ Atualizar</button>'
+      +'<div class="ind-spacer"></div>'
+      +'<label class="ind-chk"><input type="checkbox" id="indFontes"> Mostrar fonte</label>'
+      +'<span class="muted" style="font-size:12px">Gerado: '+esc(ger)+'</span>'
+      +'</div>'+exec+secoes;
+    // interações
+    const seg=host.querySelector('#indFiltro');
+    seg.addEventListener('click',ev=>{ const b=ev.target.closest('button'); if(!b) return;
+      [...seg.children].forEach(x=>x.classList.toggle('on',x===b)); const f=b.dataset.f;
+      host.querySelectorAll('.ind-card').forEach(c=>c.classList.toggle('ind-hide', f!=='all'&&c.dataset.sev!==f));
+      host.querySelectorAll('[data-grp]').forEach(s=>s.classList.toggle('ind-hide', s.querySelectorAll('.ind-card:not(.ind-hide)').length===0));
+    });
+    host.querySelector('#indFontes').addEventListener('change',ev=>host.classList.toggle('showf',ev.target.checked));
+    host.querySelector('#indReload').addEventListener('click',renderIndicadores);
+  }).catch(e=>{
+    host.innerHTML='<div class="card pad">Não foi possível carregar os indicadores.'+(e&&e.message?' '+esc(e.message):'')+'<div style="margin-top:10px"><button class="btn" data-onclick="renderIndicadores()">Tentar de novo</button></div></div>';
+  });
+}
+window.renderIndicadores=renderIndicadores;
+window.irIndicadores=()=>openBoPage('indicadores');
+
+// Linha-resumo dos indicadores críticos no topo da tela inicial (só admin).
+function renderHomeCriticos(){
+  const box=$('#homeCriticos'); if(!box) return;
+  if(!isAdmin()){ box.hidden=true; return; }
+  Promise.all([sb.rpc('erp_indicadores'), sb.rpc('erp_indicadores_fin')]).then(([r1,r2])=>{
+    if(r1.error) throw r1.error;
+    const data=Object.assign({}, r1.data||{}, (r2 && !r2.error && r2.data)?r2.data:{});
+    const crit=[]; buildIndicadores(data).forEach(g=>g.items.forEach(it=>{ if(it.s==='crit') crit.push(it); }));
+    if(!crit.length){ box.hidden=true; box.innerHTML=''; return; }
+    const lista=crit.slice(0,4).map(it=>'<b>'+esc(it.n)+':</b> '+esc(it.v)).join(' &nbsp;·&nbsp; ')+(crit.length>4?' …':'');
+    box.innerHTML='<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;background:var(--red-soft,#fdeceb);border:1px solid #f1b9b5;border-radius:12px;padding:10px 14px;margin:0 0 14px">'
+      +'<span style="font-weight:800;color:var(--red);white-space:nowrap">⚠️ '+crit.length+' crítico'+(crit.length>1?'s':'')+'</span>'
+      +'<span style="flex:1;min-width:150px;font-size:13px;color:var(--ink)">'+lista+'</span>'
+      +'<button class="btn ghost sm" data-onclick="irIndicadores()">Ver Indicadores 360</button></div>';
+    box.hidden=false;
+  }).catch(()=>{ box.hidden=true; });
+}
+window.renderHomeCriticos=renderHomeCriticos;
 
 function enterPdv(){
   currentPage='caixa';
@@ -1056,7 +1278,7 @@ window.pdvOfflineCacheState = function(){
 // ============ CHECAGEM DE NOVA VERSÃO (caixa instalado) ============
 // O caixa roda dos arquivos locais; para saber se saiu versão nova, consulta o version.json
 // do site publicado e avisa (com link para baixar o instalador). Não aplica sozinho.
-const ONPDV_VERSION='2026.09.25-v62';
+const ONPDV_VERSION='2026.09.25-v63';
 const ONPDV_SITE='https://onpdv.vercel.app';
 // O badge do card "Instalador da Frente de Caixa" mostra a mesma versão. Preenchemos
 // por aqui para não existir um segundo lugar no código que alguém precise lembrar de
@@ -7190,6 +7412,7 @@ window.saveStore = async (id)=>{
 async function loadHome(){
   const hoje=hojeISO();
   const el=$('#homeDate'); if(el) el.textContent='Hoje · '+new Date().toLocaleDateString('pt-BR');
+  try{ renderHomeCriticos(); }catch(_){}
   const { data } = await sb.rpc('erp_dashboard_multi',{ p_ini:hoje, p_fim:hoje });
   const d=data||{};
   const vencR=+d.a_receber_vencido_geral||0, vencP=+d.a_pagar_vencido_geral||0;
