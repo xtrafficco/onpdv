@@ -4907,8 +4907,8 @@ async function renderProducts(){
   $('#prodBody').innerHTML = list.map(p=>{
     const low = p.track_stock && (+p.estoque)<=(+p.estoque_min);
     return `<tr class="${low?'low':''}">
-      <td><b>${esc(p.nome)}</b> ${low?'<span class="chip amber">baixo</span>':''}
-        ${p.embalagem?`<span class="muted" style="font-size:11px">· ${esc(p.embalagem)}${+p.pack_size>1?' c/'+(+p.pack_size):''}</span>`:''}</td>
+      <td><div style="display:flex;align-items:center;gap:10px">${fotoAdminHTML(p,40)}<div><b>${esc(p.nome)}</b> ${low?'<span class="chip amber">baixo</span>':''}
+        ${p.embalagem?`<span class="muted" style="font-size:11px">· ${esc(p.embalagem)}${+p.pack_size>1?' c/'+(+p.pack_size):''}</span>`:''}</div></div></td>
       <td>${esc(p.sku||'—')}</td>
       <td>${p.categoria?`<span class="chip">${esc(p.categoria)}</span>`:'<span class="muted">—</span>'}</td>
       <td class="r">${BRL(p.preco)}</td><td class="r muted">${BRL(p.custo)}</td>
@@ -4938,6 +4938,69 @@ function trendBadge(t){
   if(t.trend==='down') return `<span class="trend down" title="${tip}">↓ caindo</span>`;
   return `<span class="trend flat" title="${tip}">→ estável</span>`;
 }
+// ---- foto do produto (bucket público 'produtos'; upload direto do ERP) ----
+const STORAGE_PRODUTOS = 'https://qkhpvqepgozsaamxmugk.supabase.co/storage/v1/object/public/produtos/';
+function urlProdImg(p){ return p && p.imagem_path ? STORAGE_PRODUTOS + encodeURIComponent(p.imagem_path) : ''; }
+function fotoAdminHTML(p, tam=64){
+  const u = urlProdImg(p);
+  return u
+    ? `<img src="${esc(u)}" alt="" style="width:${tam}px;height:${tam}px;object-fit:cover;border-radius:10px;background:#eef2fb;flex:none">`
+    : `<div style="width:${tam}px;height:${tam}px;border-radius:10px;background:#eef2fb;display:grid;place-items:center;color:#9aa6c4;font-size:${Math.round(tam*0.42)}px;flex:none" aria-hidden="true">🐾</div>`;
+}
+// Reduz para ~900px e converte para webp; se algo falhar, envia o arquivo original.
+async function comprimirImagem(file){
+  try{
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const max = 900, escala = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const w = Math.round(bmp.width * escala), h = Math.round(bmp.height * escala);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    cv.getContext('2d').drawImage(bmp, 0, 0, w, h);
+    if(bmp.close) bmp.close();
+    const blob = await new Promise(r => cv.toBlob(r, 'image/webp', 0.82));
+    if(blob) return { blob, ext:'webp', type:'image/webp' };
+  }catch(e){ /* cai no original */ }
+  const ext = ((file.type.split('/')[1]) || 'jpg').replace('jpeg','jpg');
+  return { blob:file, ext, type:file.type || 'image/jpeg' };
+}
+window.pfPickFoto = ()=>{ const i=$('#pfFoto'); if(i) i.click(); };
+window.pfUploadFoto = async (input)=>{
+  const file = input.files && input.files[0]; if(!file) return;
+  if(!/^image\//.test(file.type)){ toast('Escolha um arquivo de imagem.',true); input.value=''; return; }
+  const pid = input.dataset.pid, old = input.dataset.old || '';
+  const msg = $('#pfFotoMsg'); if(msg) msg.textContent = 'Enviando foto…';
+  try{
+    const { blob, ext, type } = await comprimirImagem(file);
+    if(blob.size > 3*1024*1024) throw new Error('imagem muito grande');
+    const path = pid + '-' + Math.random().toString(36).slice(2,8) + '.' + ext;
+    const up = await sb.storage.from('produtos').upload(path, blob, { contentType:type, cacheControl:'300', upsert:true });
+    if(up.error) throw up.error;
+    const { error } = await sb.rpc('erp_set_product_image', { p_product: pid, p_path: path });
+    if(error) throw error;
+    const prod = (PRODUCTS||[]).find(x=>x.id===pid); if(prod) prod.imagem_path = path;
+    input.dataset.old = path;
+    const prev = $('#pfFotoPrev'); if(prev) prev.innerHTML = fotoAdminHTML({ imagem_path:path }, 72);
+    if(msg) msg.textContent = 'Foto atualizada ✅';
+    toast('Foto do produto atualizada');
+    if(old && old !== path) sb.storage.from('produtos').remove([old]).catch(()=>{});
+    try{ buildPdvCatalog(); }catch(_){}
+  }catch(e){
+    if(msg) msg.textContent = 'Não deu para enviar: ' + (e.message || e);
+    toast('Erro ao enviar a foto',true);
+  }finally{ input.value=''; }
+};
+window.pfRemoverFoto = async (pid, old)=>{
+  if(!await uiConfirm('Remover a foto deste produto?')) return;
+  try{
+    const { error } = await sb.rpc('erp_set_product_image', { p_product: pid, p_path: null });
+    if(error) throw error;
+    const prod = (PRODUCTS||[]).find(x=>x.id===pid); if(prod) prod.imagem_path = null;
+    if(old) sb.storage.from('produtos').remove([old]).catch(()=>{});
+    const prev = $('#pfFotoPrev'); if(prev) prev.innerHTML = fotoAdminHTML({ imagem_path:null }, 72);
+    const msg = $('#pfFotoMsg'); if(msg) msg.textContent = 'Foto removida.';
+    toast('Foto removida'); try{ buildPdvCatalog(); }catch(_){}
+  }catch(e){ toast('Erro: ' + (e.message || e), true); }
+};
+
 window.prodForm = (p={})=>{
   modal(`
     <div class="m-head"><h3>${p.id?'Editar':'Novo'} produto</h3><button data-modal-close>×</button></div>
@@ -4964,6 +5027,18 @@ window.prodForm = (p={})=>{
       </div>
       <label style="display:flex;align-items:center;gap:8px;font-weight:700;margin-top:4px">
         <input type="checkbox" id="pfTrack" ${p.track_stock!==false?'checked':''}> Controlar estoque deste produto</label>
+      <div class="field" style="margin-top:11px">
+        <label class="lbl">🖼️ Foto do produto <span class="muted" style="font-weight:600;font-size:12px">(aparece no pedido pelo site)</span></label>
+        ${p.id?`<div style="display:flex;align-items:center;gap:12px">
+          <div id="pfFotoPrev">${fotoAdminHTML(p,72)}</div>
+          <div>
+            <input type="file" id="pfFoto" accept="image/*" class="hide" data-pid="${esc(p.id)}" data-old="${esc(p.imagem_path||'')}" data-onchange="pfUploadFoto(this)">
+            <button type="button" class="btn ghost sm" data-onclick="pfPickFoto()">${p.imagem_path?'Trocar foto':'Enviar foto'}</button>
+            ${p.imagem_path?`<button type="button" class="btn ghost sm red" data-onclick='pfRemoverFoto(${JSON.stringify(p.id)},${JSON.stringify(p.imagem_path)})'>Remover</button>`:''}
+            <div id="pfFotoMsg" class="muted" style="font-size:12px;margin-top:4px">JPG ou PNG; reduzimos para ~900px automaticamente.</div>
+          </div>
+        </div>`:`<p class="muted" style="font-size:13px">Salve o produto primeiro; depois reabra em Editar para enviar a foto.</p>`}
+      </div>
       ${!p.id?`<div class="field" style="margin-top:11px"><label class="lbl" for="pfEst">Estoque inicial</label><input id="pfEst" class="in" value="0"></div>`:''}
     </div>
     <div class="m-foot"><button class="btn ghost" data-modal-close>Cancelar</button>
